@@ -6,7 +6,7 @@ _root = os.path.normpath(os.path.join(os.path.dirname(__file__), '..'))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-for _pkg in ('LarcCommon', 'LarcSuperviseur', 'LarcSecretaire', 'LarcRH'):
+for _pkg in ('LarcCommon', 'LarcSuperviseur', 'LarcSecretaire', 'LarcRH', 'LarcCompta'):
     _p = os.path.join(_root, _pkg)
     if os.path.isdir(_p) and _p not in sys.path:
         sys.path.insert(0, _p)

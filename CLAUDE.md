@@ -25,6 +25,7 @@ Dernière mise à jour : 2026-08-06
 | `LarcDesign/` | Designer (i18n, thèmes, rôles, logs, types, lieux) | `python -m LarcDesign` |
 | `LarcCloudSync/` | Daemon sync PostgreSQL local ↔ Supabase cloud | — |
 | `LarcRH/` | Ressources Humaines (enseignants, staff, absences) | `python -m LarcRH` |
+| `LarcCompta/` | Comptabilité (frais scolarité, paiements, rappels) | `python -m LarcCompta` |
 | `LarcDocs/` | Génération documentation (manuel, technique, guide) | — |
 | `LarcSupMobile/` | App mobile Flutter (spécifications dans `specificationsMobile/`) | — |
 
@@ -42,6 +43,7 @@ python -m LarcSecretaire           # Secrétariat
 python -m LarcHub                  # Hub
 python -m LarcProf                 # Professeurs
 python -m LarcRH                   # Ressources Humaines
+python -m LarcCompta               # Comptabilité
 python -m LarcDesign               # Designer
 
 # Tests
@@ -209,6 +211,15 @@ f"color: {p.text_strong}; font-size: {ds.font_body}px;"
 | `views/staff_detail.py` | Détail + timeline événements (absences/retards) |
 | `views/staff_events.py` | EventGenerator adapté (staff_event au lieu de student_event) |
 | `sql/init_staff.sql` | DDL : `larcauth_staff` + `staff_event` |
+
+### LarcCompta
+| Fichier | Rôle |
+|---|---|
+| `views/main_window.py` | Orchestrateur : sidebar navigation + QStackedWidget |
+| `views/dashboard.py` | KPIs + donut chart + bar chart + detail par programme |
+| `views/payment_list.py` | Liste des paiements + dialogue ajout avec recherche élève |
+| `views/reminders.py` | Liste des impayés + envoi rappels (email/SMS/WhatsApp/courrier) |
+| `sql/init_compta.sql` | DDL : `compta_fee_structure` + `compta_payment_schedule` + `compta_payment` + `compta_reminder` |
 
 ### LarcProf
 | Fichier | Rôle |

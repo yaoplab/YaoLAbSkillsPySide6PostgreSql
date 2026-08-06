@@ -255,7 +255,7 @@ class HubWindow(QWidget):
         sections.append(('rh', 'Ress. Humaines', has_rh, conn_ok))
 
         has_compta = tf.get('director') or tf.get('secretary')
-        sections.append(('compta', 'Comptabilite', has_compta, False))
+        sections.append(('compta', 'Comptabilite', has_compta, conn_ok))
 
         for key, label, has_role, enabled in sections:
             btn = _SectionButton(label, icon_name=section_icons.get(key))
@@ -324,9 +324,11 @@ class HubWindow(QWidget):
                 from LarcSecretaire.views.main_window import MainWindow
                 main_win = MainWindow()
             elif key == 'rh':
-                import LarcRH.main as _rh_init
                 from LarcRH.views.main_window import MainWindow as RHMainWindow
                 main_win = RHMainWindow()
+            elif key == 'compta':
+                from LarcCompta.views.main_window import MainWindow as ComptaMainWindow
+                main_win = ComptaMainWindow()
             else:
                 return
 
