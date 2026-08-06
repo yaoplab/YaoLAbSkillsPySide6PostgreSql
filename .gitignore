@@ -6,6 +6,16 @@ __pycache__/
 .venv/
 venv/
 
+# Sensitive
+config.ini
+*.bak
+.env
+credentials.*
+
+# SQLite
+*.db-shm
+*.db-wal
+
 # IDE
 .vscode/
 .idea/
