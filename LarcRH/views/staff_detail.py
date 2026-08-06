@@ -85,11 +85,9 @@ class StaffDetail(QWidget):
         # Rôles
         if self._staff.get("is_staff"):
             staff_roles = {
-                'is_DRH': 'DRH', 'is_comptable': 'Comptable', 'is_secretaire': 'Secrétaire',
-                'is_AVS': 'AVS', 'is_technicien_surface': 'Technicien Surface',
-                'is_technicien_info': 'Technicien Info', 'is_documentaliste': 'Documentaliste',
-                'is_infirmier': 'Infirmier', 'is_psychologue': 'Psychologue',
-                'is_directeur': 'Directeur',
+                'type_DRH': 'DRH', 'type_Comptable': 'Comptable',
+                'type_ressources_Humaines': 'Ressources Humaines',
+                'type_Bulletin_Releves': 'Bulletins / Relevés',
             }
             roles = [label for key, label in staff_roles.items() if self._staff.get(key)]
         else:

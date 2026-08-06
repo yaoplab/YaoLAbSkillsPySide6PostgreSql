@@ -13,18 +13,12 @@ from larccommon.design_system import ds
 from larccommon.theme import theme_manager
 from larccommon.safe_slot import safe_slot
 
-# Labels pour les colonnes métier staff
+# Labels pour les colonnes métier staff (4 rôles non enseignant)
 STAFF_ROLES = [
-    ('is_DRH', 'DRH'),
-    ('is_comptable', 'Comptable'),
-    ('is_secretaire', 'Secrétaire'),
-    ('is_AVS', 'AVS'),
-    ('is_technicien_surface', 'Tech. Surface'),
-    ('is_technicien_info', 'Tech. Info'),
-    ('is_documentaliste', 'Documentaliste'),
-    ('is_infirmier', 'Infirmier'),
-    ('is_psychologue', 'Psychologue'),
-    ('is_directeur', 'Directeur'),
+    ('type_DRH', 'DRH'),
+    ('type_Comptable', 'Comptable'),
+    ('type_ressources_Humaines', 'Ress. Humaines'),
+    ('type_Bulletin_Releves', 'Bulletins / Relevés'),
 ]
 
 TEACHADM_ROLES = [

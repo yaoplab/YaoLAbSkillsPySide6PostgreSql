@@ -102,13 +102,10 @@ class _StaffCard(QFrame):
 
         # Roles
         if self._data.get("is_staff"):
-            # Staff non enseignant — colonnes métier
             staff_roles = {
-                'is_DRH': 'DRH', 'is_comptable': 'Comptable', 'is_secretaire': 'Secrétaire',
-                'is_AVS': 'AVS', 'is_technicien_surface': 'Tech. Surface',
-                'is_technicien_info': 'Tech. Info', 'is_documentaliste': 'Documentaliste',
-                'is_infirmier': 'Infirmier', 'is_psychologue': 'Psychologue',
-                'is_directeur': 'Directeur',
+                'type_DRH': 'DRH', 'type_Comptable': 'Comptable',
+                'type_ressources_Humaines': 'Ress. Humaines',
+                'type_Bulletin_Releves': 'Bulletins/Relevés',
             }
             roles = [label for key, label in staff_roles.items() if self._data.get(key)]
         else:
@@ -249,10 +246,8 @@ class StaffGrid(QScrollArea):
             if self._is_staff:
                 cur.execute("""
                     SELECT a.id, a.first_name, a.last_name, a.email,
-                           s.is_DRH, s.is_comptable, s.is_secretaire, s.is_AVS,
-                           s.is_technicien_surface, s.is_technicien_info,
-                           s.is_documentaliste, s.is_infirmier,
-                           s.is_psychologue, s.is_directeur
+                           s.type_DRH, s.type_Comptable,
+                           s.type_ressources_Humaines, s.type_Bulletin_Releves
                     FROM larcauth_aecuser a
                     JOIN larcauth_staff s ON s.aecuser_ptr_id = a.id
                     WHERE a.id BETWEEN %s AND %s AND s.enabled = true
@@ -283,10 +278,8 @@ class StaffGrid(QScrollArea):
                         "id": row[0], "full_name": f"{row[2]} {row[1]}",
                         "first_name": row[1], "last_name": row[2], "email": row[3],
                         "is_staff": True,
-                        "is_DRH": row[4], "is_comptable": row[5], "is_secretaire": row[6],
-                        "is_AVS": row[7], "is_technicien_surface": row[8],
-                        "is_technicien_info": row[9], "is_documentaliste": row[10],
-                        "is_infirmier": row[11], "is_psychologue": row[12], "is_directeur": row[13],
+                        "type_DRH": row[4], "type_Comptable": row[5],
+                        "type_ressources_Humaines": row[6], "type_Bulletin_Releves": row[7],
                     }
                 else:
                     data = {
