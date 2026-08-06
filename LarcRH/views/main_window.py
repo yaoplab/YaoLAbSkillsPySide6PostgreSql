@@ -230,18 +230,10 @@ class MainWindow(QWidget):
 
         if key not in self._grids:
             from LarcRH.views.staff_grid import StaffGrid
-            from PySide6.QtWidgets import QScrollArea
             cat = next((c for c in CATEGORIES if c[0] == key), None)
             grid = StaffGrid(key, cat[2], cat[3], is_staff=(key == 'staff'))
-            # Wrapper dans un QScrollArea pour le scroll vertical
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            scroll.setFrameShape(QScrollArea.NoFrame)
-            scroll.setWidget(grid)
-            scroll.setStyleSheet(f"background: {theme_manager.palette.background}; border: none;")
-            self._grids[key] = scroll
-            self._stack.addWidget(scroll)
+            self._grids[key] = grid
+            self._stack.addWidget(grid)
 
         self._stack.setCurrentWidget(self._grids[key])
 
@@ -255,8 +247,7 @@ class MainWindow(QWidget):
         if dlg.exec():
             self._load_counts()
             if self._current_key in self._grids:
-                scroll = self._grids[self._current_key]
-                scroll.widget().refresh()
+                self._grids[self._current_key].refresh()
 
     @safe_slot("MainWindow._restyle")
     def _restyle(self):

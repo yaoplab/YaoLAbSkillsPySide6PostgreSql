@@ -1,13 +1,12 @@
-"""StaffGrid — grille photos responsive (largeur adaptative)."""
+"""StaffGrid — grille photos responsive (QScrollArea + QGridLayout adaptatif)."""
 from __future__ import annotations
 
-import math
 import os
 
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QPixmap, QPainter, QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
+    QWidget, QVBoxLayout, QHBoxLayout, QScrollArea, QGridLayout,
     QLabel, QPushButton, QFrame, QSizePolicy,
 )
 
@@ -19,7 +18,9 @@ from larccommon.safe_slot import safe_slot
 
 # Dimensions Fibonacci : 136×220 = ratio d'or (220/136 ≈ 1.618 = φ)
 CARD_W = ds.space_xxxl  # 136
-CARD_H = 220             # Fibonacci F(11) — golden pair avec 136
+CARD_H = 220             # SpacingToken.HUGE — golden pair avec 136
+SPACING = ds.space_sm    # 12
+MARGIN = ds.space_md     # 20
 
 
 def _make_avatar(name: str, size: int = 100) -> QPixmap:
@@ -41,7 +42,6 @@ def _make_avatar(name: str, size: int = 100) -> QPixmap:
 
 
 class _StaffCard(QFrame):
-    """Carte photo d'un membre du personnel."""
 
     def __init__(self, data: dict, parent=None):
         super().__init__(parent)
@@ -55,7 +55,6 @@ class _StaffCard(QFrame):
 
     def _style(self) -> str:
         p = theme_manager.palette
-        s = theme_manager.font_size
         return f"""
             #staff_card {{
                 background: {p.surface}; border: 1px solid {p.outline_variant};
@@ -68,7 +67,7 @@ class _StaffCard(QFrame):
         p = theme_manager.palette
         s = theme_manager.font_size
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)  # 8px = F6, comme student card
+        layout.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)
         layout.setSpacing(ds.space_xs)
 
         # Photo
@@ -164,7 +163,7 @@ class _StaffCard(QFrame):
         self.setStyleSheet(self._style())
 
 
-class StaffGrid(QWidget):
+class StaffGrid(QScrollArea):
     """Grille de photos responsive — s'adapte à la largeur, scroll vertical."""
 
     def __init__(self, cat_key: str, id_lo: int, id_hi: int,
@@ -174,51 +173,64 @@ class StaffGrid(QWidget):
         self._id_lo = id_lo
         self._id_hi = id_hi
         self._is_staff = is_staff
-        self._cards: list[QWidget] = []
         self._cols = 1
-        self._margin = ds.space_md
 
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setFrameShape(QScrollArea.NoFrame)
         self.setStyleSheet(f"background: {theme_manager.palette.background}; border: none;")
+
+        self._container = QWidget()
+        self._grid = QGridLayout(self._container)
+        self._grid.setContentsMargins(MARGIN, MARGIN, MARGIN, MARGIN)
+        self._grid.setSpacing(SPACING)
+        self.setWidget(self._container)
+
+        self.refresh()
 
     def refresh(self):
         self._load_data()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._relayout()
+        self._reflow()
 
-    def _relayout(self):
-        if not self._cards:
+    def _cols_for_width(self) -> int:
+        avail = self.viewport().width() - MARGIN * 2
+        return max(1, (avail + SPACING) // (CARD_W + SPACING))
+
+    def _reflow(self):
+        """Redistribue les widgets dans la grille après redimensionnement."""
+        new_cols = self._cols_for_width()
+        if new_cols == self._cols:
             return
-        avail = self.width() - self._margin * 2
-        self._cols = max(1, (avail + ds.space_sm) // (CARD_W + ds.space_sm))
-        total_w = self._cols * CARD_W + (self._cols - 1) * ds.space_sm
-        x0 = max(self._margin, (self.width() - total_w) // 2)
+        self._cols = new_cols
 
-        for i, card in enumerate(self._cards):
-            col = i % self._cols
-            row = i // self._cols
-            x = x0 + col * (CARD_W + ds.space_sm)
-            y = self._margin + row * (CARD_H + ds.space_sm)
-            card.move(x, y)
-
-        rows = math.ceil(len(self._cards) / self._cols)
-        needed_h = self._margin + rows * CARD_H + (rows - 1) * ds.space_sm + self._margin
-        self.setMinimumHeight(needed_h)
+        for i in range(self._grid.count()):
+            item = self._grid.itemAt(i)
+            if item and item.widget():
+                w = item.widget()
+                row = i // new_cols
+                col = i % new_cols
+                # Le widget est déjà dans le grid, on le repositionne
+                r, c, rs, cs = self._grid.getItemPosition(i)
+                if r != row or c != col:
+                    self._grid.removeWidget(w)
+                    self._grid.addWidget(w, row, col)
 
     def _load_data(self):
-        for c in self._cards:
-            c.deleteLater()
-        self._cards.clear()
+        # Nettoyer
+        while self._grid.count():
+            item = self._grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
 
         conn = db.server_conn
         if not conn:
-            lbl = QLabel("Base de données non disponible", self)
+            lbl = QLabel("Base de données non disponible")
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setStyleSheet(f"color: {theme_manager.palette.error}; font-size: {theme_manager.font_size(13)}px;")
-            lbl.setGeometry(0, 60, self.width(), 30)
-            self._cards.append(lbl)
-            self._relayout()
+            self._grid.addWidget(lbl, 0, 0)
             return
 
         try:
@@ -244,15 +256,14 @@ class StaffGrid(QWidget):
 
             rows = cur.fetchall()
             if not rows:
-                lbl = QLabel("Aucun membre trouvé dans cette catégorie", self)
+                lbl = QLabel("Aucun membre trouvé dans cette catégorie")
                 lbl.setAlignment(Qt.AlignCenter)
                 lbl.setStyleSheet(f"color: {theme_manager.palette.text_soft}; font-size: {theme_manager.font_size(13)}px;")
-                lbl.setGeometry(0, 60, self.width(), 30)
-                self._cards.append(lbl)
-                self._relayout()
+                self._grid.addWidget(lbl, 0, 0)
                 return
 
-            for row in rows:
+            self._cols = self._cols_for_width()
+            for i, row in enumerate(rows):
                 data = {
                     "id": row[0],
                     "full_name": f"{row[2]} {row[1]}",
@@ -265,17 +276,12 @@ class StaffGrid(QWidget):
                     "is_adm": row[7],
                     "is_staff": self._is_staff,
                 }
-                card = _StaffCard(data, self)
-                card.show()
-                self._cards.append(card)
-
-            self._relayout()
+                card = _StaffCard(data)
+                self._grid.addWidget(card, i // self._cols, i % self._cols)
 
         except Exception as e:
-            lbl = QLabel(f"Erreur : {e}", self)
+            lbl = QLabel(f"Erreur : {e}")
             lbl.setAlignment(Qt.AlignCenter)
             lbl.setWordWrap(True)
             lbl.setStyleSheet(f"color: {theme_manager.palette.error}; font-size: {theme_manager.font_size(11)}px;")
-            lbl.setGeometry(self._margin, 60, self.width() - self._margin * 2, 40)
-            self._cards.append(lbl)
-            self._relayout()
+            self._grid.addWidget(lbl, 0, 0)
