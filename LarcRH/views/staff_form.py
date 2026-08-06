@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QCheckBox, QPushButton, QDateEdit, QComboBox,
+    QLabel, QLineEdit, QCheckBox, QPushButton, QDateEdit, QComboBox, QWidget,
 )
 from PySide6.QtCore import QDate
 
