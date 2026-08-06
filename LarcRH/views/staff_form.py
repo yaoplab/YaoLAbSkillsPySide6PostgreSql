@@ -4,7 +4,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QLineEdit, QCheckBox, QPushButton, QDateEdit, QComboBox, QWidget,
+    QLabel, QLineEdit, QCheckBox, QPushButton, QDateEdit, QComboBox, QWidget, QGridLayout,
 )
 from PySide6.QtCore import QDate
 
@@ -12,6 +12,26 @@ from larccommon.database import db
 from larccommon.design_system import ds
 from larccommon.theme import theme_manager
 from larccommon.safe_slot import safe_slot
+
+# Labels pour les colonnes métier staff
+STAFF_ROLES = [
+    ('is_DRH', 'DRH'),
+    ('is_comptable', 'Comptable'),
+    ('is_secretaire', 'Secrétaire'),
+    ('is_AVS', 'AVS'),
+    ('is_technicien_surface', 'Tech. Surface'),
+    ('is_technicien_info', 'Tech. Info'),
+    ('is_documentaliste', 'Documentaliste'),
+    ('is_infirmier', 'Infirmier'),
+    ('is_psychologue', 'Psychologue'),
+    ('is_directeur', 'Directeur'),
+]
+
+TEACHADM_ROLES = [
+    ('is_teacher', 'Enseignant'),
+    ('is_coordonator', 'Coordinateur'),
+    ('is_adm', 'Admin'),
+]
 
 
 class StaffFormDialog(QDialog):
@@ -24,9 +44,12 @@ class StaffFormDialog(QDialog):
         self._id_hi = id_hi
         self._staff_data = staff_data
         self._is_new = staff_data is None
+        # Déterminer si staff (4001+) ou teachadm (1001-4000)
+        self._is_staff = (staff_data.get("is_staff") if staff_data else id_lo >= 4001)
+        self._checkboxes: dict[str, QCheckBox] = {}
 
         self.setWindowTitle("Ajouter un membre" if self._is_new else "Modifier le membre")
-        self.setMinimumSize(450, 400)
+        self.setMinimumSize(500, 420 if self._is_staff else 350)
         self.setStyleSheet(f"background: {theme_manager.palette.surface};")
         self._setup_ui()
 
@@ -85,21 +108,23 @@ class StaffFormDialog(QDialog):
 
         layout.addLayout(form)
 
-        # Rôles
-        roles_widget = QWidget()
-        roles_layout = QHBoxLayout(roles_widget)
-        roles_layout.setContentsMargins(0, 0, 0, 0)
+        # Rôles — dynamique selon staff vs teachadm
+        cb_style = f"color: {theme_manager.palette.text_strong}; font-size: {theme_manager.font_size(12)}px;"
+        role_set = STAFF_ROLES if self._is_staff else TEACHADM_ROLES
 
-        self._cb_teacher = QCheckBox("Enseignant")
-        self._cb_coord = QCheckBox("Coordinateur")
-        self._cb_secr = QCheckBox("Secrétaire")
-        self._cb_adm = QCheckBox("Admin")
+        role_label = QLabel("Postes / Rôles :")
+        role_label.setStyleSheet(f"font-weight: bold; color: {theme_manager.palette.text_strong};")
+        layout.addWidget(role_label)
 
-        for cb in [self._cb_teacher, self._cb_coord, self._cb_secr, self._cb_adm]:
-            cb.setStyleSheet(f"color: {theme_manager.palette.text_strong}; font-size: {theme_manager.font_size(12)}px;")
-            roles_layout.addWidget(cb)
-
-        layout.addWidget(roles_widget)
+        grid = QGridLayout()
+        grid.setSpacing(ds.space_xs)
+        cols = 3
+        for i, (key, label) in enumerate(role_set):
+            cb = QCheckBox(label)
+            cb.setStyleSheet(cb_style)
+            grid.addWidget(cb, i // cols, i % cols)
+            self._checkboxes[key] = cb
+        layout.addLayout(grid)
 
         layout.addStretch()
 
@@ -144,17 +169,15 @@ class StaffFormDialog(QDialog):
         self._f_first.setText(d.get("first_name", ""))
         self._f_last.setText(d.get("last_name", ""))
         self._f_email.setText(d.get("email", ""))
-        self._cb_teacher.setChecked(d.get("is_teacher", False))
-        self._cb_coord.setChecked(d.get("is_coordonator", False))
-        self._cb_secr.setChecked(d.get("is_secretary", False))
-        self._cb_adm.setChecked(d.get("is_adm", False))
+        # Cocher les cases correspondantes
+        for key, cb in self._checkboxes.items():
+            cb.setChecked(d.get(key, False))
 
     @safe_slot("StaffFormDialog._on_save")
     def _on_save(self):
         first = self._f_first.text().strip()
         last = self._f_last.text().strip()
         email = self._f_email.text().strip()
-        phone = self._f_phone.text().strip()
 
         if not last or not first:
             return
@@ -167,7 +190,6 @@ class StaffFormDialog(QDialog):
             cur = conn.cursor()
 
             if self._is_new:
-                # Trouver un slot libre dans la plage d'IDs
                 cur.execute("""
                     SELECT id FROM larcauth_aecuser
                     WHERE id BETWEEN %s AND %s AND is_active = FALSE
@@ -176,7 +198,6 @@ class StaffFormDialog(QDialog):
                 """, (self._id_lo, self._id_hi))
                 row = cur.fetchone()
                 if not row:
-                    # Créer un nouvel AECUser si aucun slot libre
                     cur.execute("SELECT COALESCE(MAX(id), %s) + 1 FROM larcauth_aecuser WHERE id BETWEEN %s AND %s",
                                 (self._id_lo - 1, self._id_lo, self._id_hi))
                     new_id = cur.fetchone()[0]
@@ -190,10 +211,8 @@ class StaffFormDialog(QDialog):
                     new_id = row[0]
                     cur.execute("""
                         UPDATE larcauth_aecuser SET first_name = %s, last_name = %s,
-                        email = %s, is_active = TRUE
-                        WHERE id = %s
+                        email = %s, is_active = TRUE WHERE id = %s
                     """, (first, last, email, new_id))
-
                 self._new_id = new_id
             else:
                 new_id = self._staff_data["id"]
@@ -202,27 +221,27 @@ class StaffFormDialog(QDialog):
                     email = %s WHERE id = %s
                 """, (first, last, email, new_id))
 
-            # Mise à jour teachadm ou staff
-            if self._staff_data and self._staff_data.get("is_staff"):
-                cur.execute("""
-                    INSERT INTO larcauth_staff (aecuser_ptr_id, enabled, hire_date)
-                    VALUES (%s, TRUE, %s)
-                    ON CONFLICT (aecuser_ptr_id) DO UPDATE SET enabled = TRUE, hire_date = %s
-                """, (new_id, self._f_hire.date().toPython(), self._f_hire.date().toPython()))
+            # INSERT/UPDATE la table de liaison (staff ou teachadm)
+            hire_date = self._f_hire.date().toPython()
+            if self._is_staff:
+                cols = ", ".join(f"{k} = %s" for k, _ in STAFF_ROLES)
+                vals = [self._checkboxes[k].isChecked() if k in self._checkboxes else False for k, _ in STAFF_ROLES]
+                cur.execute(f"""
+                    INSERT INTO larcauth_staff (aecuser_ptr_id, enabled, hire_date, {', '.join(k for k, _ in STAFF_ROLES)})
+                    VALUES (%s, TRUE, %s, {', '.join('%s' for _ in STAFF_ROLES)})
+                    ON CONFLICT (aecuser_ptr_id) DO UPDATE SET enabled = TRUE, hire_date = %s, {cols}
+                """, [new_id, hire_date] + vals + [hire_date] + vals)
             else:
-                cur.execute("""
-                    INSERT INTO larcauth_teachadm (aecuser_ptr_id, is_teacher, is_coordonator,
-                    is_secretary, is_adm, enabled)
-                    VALUES (%s, %s, %s, %s, %s, TRUE)
-                    ON CONFLICT (aecuser_ptr_id) DO UPDATE SET
-                    is_teacher = %s, is_coordonator = %s, is_secretary = %s, is_adm = %s, enabled = TRUE
-                """, (new_id, self._cb_teacher.isChecked(), self._cb_coord.isChecked(),
-                      self._cb_secr.isChecked(), self._cb_adm.isChecked(),
-                      self._cb_teacher.isChecked(), self._cb_coord.isChecked(),
-                      self._cb_secr.isChecked(), self._cb_adm.isChecked()))
+                cols = ", ".join(f"{k} = %s" for k, _ in TEACHADM_ROLES)
+                vals = [self._checkboxes[k].isChecked() if k in self._checkboxes else False for k, _ in TEACHADM_ROLES]
+                cur.execute(f"""
+                    INSERT INTO larcauth_teachadm (aecuser_ptr_id, enabled, {', '.join(k for k, _ in TEACHADM_ROLES)})
+                    VALUES (%s, TRUE, {', '.join('%s' for _ in TEACHADM_ROLES)})
+                    ON CONFLICT (aecuser_ptr_id) DO UPDATE SET enabled = TRUE, {cols}
+                """, [new_id] + vals + vals)
 
             self.accept()
 
-        except Exception as e:
+        except Exception:
             import traceback
             traceback.print_exc()

@@ -83,12 +83,21 @@ class StaffDetail(QWidget):
         info.addWidget(email_lbl)
 
         # Rôles
-        roles = []
-        if self._staff.get("is_adm"): roles.append("Administrateur")
-        if self._staff.get("is_coordonator"): roles.append("Coordinateur")
-        if self._staff.get("is_secretary"): roles.append("Secrétaire")
-        if self._staff.get("is_teacher"): roles.append("Enseignant")
-        role_text = " · ".join(roles) if roles else "Staff non enseignant"
+        if self._staff.get("is_staff"):
+            staff_roles = {
+                'is_DRH': 'DRH', 'is_comptable': 'Comptable', 'is_secretaire': 'Secrétaire',
+                'is_AVS': 'AVS', 'is_technicien_surface': 'Technicien Surface',
+                'is_technicien_info': 'Technicien Info', 'is_documentaliste': 'Documentaliste',
+                'is_infirmier': 'Infirmier', 'is_psychologue': 'Psychologue',
+                'is_directeur': 'Directeur',
+            }
+            roles = [label for key, label in staff_roles.items() if self._staff.get(key)]
+        else:
+            roles = []
+            if self._staff.get("is_teacher"): roles.append("Enseignant")
+            if self._staff.get("is_coordonator"): roles.append("Coordinateur")
+            if self._staff.get("is_adm"): roles.append("Administrateur")
+        role_text = " · ".join(roles) if roles else "Rôle non défini"
         role_lbl = QLabel(role_text)
         role_lbl.setStyleSheet(f"""
             font-size: {theme_manager.font_size(12)}px;
