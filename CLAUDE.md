@@ -24,6 +24,7 @@ Dernière mise à jour : 2026-08-06
 | `LarcProf/` | Professeurs (notes, évaluations, SQLite locale) | `python -m LarcProf` |
 | `LarcDesign/` | Designer (i18n, thèmes, rôles, logs, types, lieux) | `python -m LarcDesign` |
 | `LarcCloudSync/` | Daemon sync PostgreSQL local ↔ Supabase cloud | — |
+| `LarcRH/` | Ressources Humaines (enseignants, staff, absences) | `python -m LarcRH` |
 | `LarcDocs/` | Génération documentation (manuel, technique, guide) | — |
 | `LarcSupMobile/` | App mobile Flutter (spécifications dans `specificationsMobile/`) | — |
 
@@ -40,6 +41,7 @@ python -m LarcSuperviseur          # Supervision
 python -m LarcSecretaire           # Secrétariat
 python -m LarcHub                  # Hub
 python -m LarcProf                 # Professeurs
+python -m LarcRH                   # Ressources Humaines
 python -m LarcDesign               # Designer
 
 # Tests
@@ -197,6 +199,16 @@ f"color: {p.text_strong}; font-size: {ds.font_body}px;"
 | `views/student_form.py` | Fiche élève — recherche + popup édition 6 onglets |
 | `views/parent_manager.py` | Gestion parents, foyers, liens élèves↔parents |
 | `views/dossier_panel.py` | Dossiers élèves par catégories + documents |
+
+### LarcRH
+| Fichier | Rôle |
+|---|---|
+| `views/main_window.py` | Orchestrateur : sidebar 4 catégories + QStackedWidget |
+| `views/staff_grid.py` | Grille photos adaptative par plage d'IDs |
+| `views/staff_form.py` | Dialogue édition/création enseignant ou staff |
+| `views/staff_detail.py` | Détail + timeline événements (absences/retards) |
+| `views/staff_events.py` | EventGenerator adapté (staff_event au lieu de student_event) |
+| `sql/init_staff.sql` | DDL : `larcauth_staff` + `staff_event` |
 
 ### LarcProf
 | Fichier | Rôle |

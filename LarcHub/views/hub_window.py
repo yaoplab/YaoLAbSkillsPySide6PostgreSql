@@ -252,7 +252,7 @@ class HubWindow(QWidget):
         sections.append(('bulletin', 'Bulletins', has_bulletin, False))
 
         has_rh = tf.get('director') or tf.get('secretary')
-        sections.append(('rh', 'Ress. Humaines', has_rh, False))
+        sections.append(('rh', 'Ress. Humaines', has_rh, conn_ok))
 
         has_compta = tf.get('director') or tf.get('secretary')
         sections.append(('compta', 'Comptabilite', has_compta, False))
@@ -323,6 +323,10 @@ class HubWindow(QWidget):
             elif key == 'secretariat':
                 from LarcSecretaire.views.main_window import MainWindow
                 main_win = MainWindow()
+            elif key == 'rh':
+                import LarcRH.main as _rh_init
+                from LarcRH.views.main_window import MainWindow as RHMainWindow
+                main_win = RHMainWindow()
             else:
                 return
 
