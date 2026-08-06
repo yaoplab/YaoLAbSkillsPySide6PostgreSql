@@ -12,13 +12,14 @@ Dépendances :
   - LarcSecretaire.common.session   (session)
 """
 
-import json
+import json as _json
 import os
 
 from larccommon.design_system import ds
 from larccommon.icons import icon as md3_icon
 from larccommon.l10n import _
 from larccommon.safe_slot import safe_slot
+from larccommon.widgets.skeleton import M3Skeleton
 from larccommon.widgets.themed_widget import ThemedDialog, ThemedWidget
 from LarcSecretaire.common.audit import audit
 from LarcSecretaire.common.database import db
@@ -39,7 +40,7 @@ from phibuilder.widgets import (
     M3HeaderView,
     M3Label,
     M3ListWidget,
-    M3StackedWidget,
+    M3ScrollArea,
     M3TableWidget,
     M3TextEdit,
     M3TextField,
@@ -51,7 +52,9 @@ from PySide6.QtGui import QColor, QPainter, QPixmap, QTextDocument
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QInputDialog,
@@ -60,6 +63,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QTableWidgetItem,
     QVBoxLayout,
+    QWidget,
 )
 
 # ──────────────────────────────────────────────
@@ -101,157 +105,192 @@ def _make_avatar(last_name: str, first_name: str, size: int = 120) -> QPixmap:
 
 class StudentForm(ThemedWidget):
     """
-    Page de gestion des fiches élèves.
+    Page de gestion des fiches eleves.
 
-    Utilisation :
-        form = StudentForm()
-        form.search("nom ou classe")   # Recherche programmatique
+    Recherche par nom et/ou prenom via deux champs dedies.
+    Les resultats affichent les badges de validation D/M/P/E.
+    Utilise M3Skeleton pendant le chargement.
     """
+
+    # ── Colonnes du tableau de resultats ──
+    _COL_NOM, _COL_PRENOM, _COL_CLASSE, _COL_NAISSANCE = range(4)
+    _COL_D, _COL_M, _COL_P, _COL_E = range(4, 8)  # badges validation
+    _COL_ID = 8  # cachee
 
     def __init__(self):
         super().__init__()
-        # Données internes
-        self._current_student: dict | None = None  # Élève actuellement affiché
-        self._results: list[dict] = []  # Résultats de recherche
-        self._dirty: bool = False  # Modifications non sauvegardées
-
-        # UI
+        self._current_student: dict | None = None
+        self._results: list[dict] = []
         self._init_ui()
+        ds.theme_changed.connect(self._restyle)
 
     # ──────────── Construction UI ────────────
 
     def _init_ui(self):
-        """Construit l'interface complète."""
+        p = ds.p
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
         layout.setSpacing(ds.space_md)
 
-        # Titre + bouton +
-        title_row = QHBoxLayout()
+        # ── Titre ──
         title = M3Label(_("student_form.title"), style="title_medium")
-        title_row.addWidget(title)
-        title_row.addStretch()
+        layout.addWidget(title)
 
-        self._add_student_btn = M3Button("+", variant=ButtonVariant.TONAL)
-        self._add_student_btn.setFixedSize(ds.button_height, ds.button_height)
-        self._add_student_btn.clicked.connect(self._open_create_dialog)
-        title_row.addWidget(self._add_student_btn)
-        layout.addLayout(title_row)
-
-        # Barre de recherche
+        # ── Barre de recherche (2 champs + bouton) ──
         search_row = QHBoxLayout()
-        self._search_input = M3TextField(placeholder=_("student_form.search_placeholder"))
-        self._search_input.returnPressed.connect(self._on_search)
-        search_row.addWidget(self._search_input, 1)
+        search_row.setSpacing(ds.space_sm)
+
+        self._inp_nom = M3TextField(placeholder=_("student_form.last_name_placeholder"))
+        self._inp_nom.setFixedHeight(ds.field_height)
+        self._inp_nom.setStyleSheet(ds.flat_input_qss())
+        self._inp_nom.returnPressed.connect(self._on_search)
+        search_row.addWidget(self._inp_nom, 2)
+
+        self._inp_prenom = M3TextField(placeholder=_("student_form.first_name_placeholder"))
+        self._inp_prenom.setFixedHeight(ds.field_height)
+        self._inp_prenom.setStyleSheet(ds.flat_input_qss())
+        self._inp_prenom.returnPressed.connect(self._on_search)
+        search_row.addWidget(self._inp_prenom, 2)
 
         self._search_btn = M3Button(_("student_form.search_button"), variant=ButtonVariant.FILLED)
+        self._search_btn.setMinimumHeight(ds.field_height)
         self._search_btn.clicked.connect(self._on_search)
         search_row.addWidget(self._search_btn)
         layout.addLayout(search_row)
 
-        # Zone de contenu : résultats (gauche) + détail (droite)
+        # ── Zone de contenu : tableau (gauche) + detail (droite) ──
         content = QHBoxLayout()
         content.setSpacing(ds.space_md)
 
-        # ── Panneau résultats (gauche) ──
-        self._results_panel = M3Card(variant=CardVariant.ELEVATED, parent=self)
-        rp_layout = self._results_panel.content_layout()
-        rp_layout.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)
+        # ── Panneau gauche : tableau des resultats ──
+        self._results_card = M3Card(variant=CardVariant.ELEVATED, parent=self)
+        rc_layout = self._results_card.content_layout()
+        rc_layout.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)
 
         self._results_label = M3Label(_("student_form.results_label").format(count=0), style="label_small")
-        self._results_label.setStyleSheet(f"font-weight: bold; color: {ds.p.text_strong};")
-        rp_layout.addWidget(self._results_label)
+        self._results_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
+        rc_layout.addWidget(self._results_label)
 
-        # Indicateur de recherche (rétroaction pendant la requête)
-        self._search_status = M3Label("", style="label_small")
-        self._search_status.setStyleSheet(f"color: {ds.p.text_strong};")
-        self._search_status.hide()
-        rp_layout.addWidget(self._search_status)
-
-        # Tableau des résultats
+        # Tableau : Nom | Prenom | Classe | Date naiss. | D | M | P | E | ID(cache)
         self._results_table = M3TableWidget()
-        self._results_table.set_headers(
-            [_("student_form.table_headers"), _("student_form.table_headers_class"), _("student_form.table_headers_email"), _("student_form.table_headers_id")]
-        )
-        self._results_table.setColumnHidden(3, True)
-        self._results_table.horizontalHeader().setStretchLastSection(True)
+        self._results_table.set_headers([
+            _("student_form.col_last_name"), _("student_form.col_first_name"),
+            _("student_form.col_class"), _("student_form.col_birth"),
+            "D", "M", "P", "E",
+            "ID",
+        ])
+        self._results_table.setColumnHidden(self._COL_ID, True)
         self._results_table.setEditTriggers(M3TableWidget.NoEditTriggers)
         self._results_table.setSelectionBehavior(M3TableWidget.SelectRows)
         self._results_table.setAlternatingRowColors(False)
-        self._results_table.itemSelectionChanged.connect(self._on_result_selected)
         self._results_table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
-        # Q1 : affordance M3 — curseur main + Entrée ouvre la fiche sélectionnée
+        self._results_table.setStyleSheet(ds.table_qss())
         self._results_table.viewport().setCursor(Qt.PointingHandCursor)
+        self._results_table.itemSelectionChanged.connect(self._on_result_selected)
         self._results_table.installEventFilter(self)
-        rp_layout.addWidget(self._results_table, 1)
+        # Reduire les colonnes badges
+        hh = self._results_table.horizontalHeader()
+        badge_w = 28
+        for col in (self._COL_D, self._COL_M, self._COL_P, self._COL_E):
+            hh.setSectionResizeMode(col, M3HeaderView.Fixed)
+            self._results_table.setColumnWidth(col, badge_w)
+        hh.setSectionResizeMode(self._COL_NOM, M3HeaderView.Interactive)
+        hh.setSectionResizeMode(self._COL_PRENOM, M3HeaderView.Interactive)
+        hh.setSectionResizeMode(self._COL_CLASSE, M3HeaderView.Interactive)
+        hh.setSectionResizeMode(self._COL_NAISSANCE, M3HeaderView.Interactive)
+        rc_layout.addWidget(self._results_table, 1)
 
-        # Q2 : état vide inline (M3) — icône + message, jamais de QMessageBox modal
-        # Taille icône via token image (sous-système E) : logo_small = 55 (le plus proche de 48)
+        # Skeleton loading pendant la requete
+        self._search_skeleton = M3Skeleton.table(self, rows=6, cols=5)
+        self._search_skeleton.set_label(_("student_form.searching"))
+        self._search_skeleton.hide()
+        rc_layout.addWidget(self._search_skeleton)
+
+        # Etat vide
         self._empty_state = M3Frame()
+        self._empty_state.setStyleSheet(f"background: transparent;")
         es_layout = QVBoxLayout(self._empty_state)
         es_layout.setSpacing(ds.space_sm)
         es_icon = QLabel()
-        es_icon.setPixmap(
-            md3_icon(
-                "search_off",
-                color=ds.p.text_disabled,
-                size=theme_manager.image.logo_small,
-            ).pixmap(theme_manager.image.logo_small, theme_manager.image.logo_small)
-        )
+        es_icon.setPixmap(md3_icon("search_off", color=p.text_disabled,
+            size=theme_manager.image.logo_small).pixmap(
+            theme_manager.image.logo_small, theme_manager.image.logo_small))
         es_icon.setAlignment(Qt.AlignCenter)
         es_layout.addWidget(es_icon)
         self._empty_state_label = M3Label(_("student_form.search_no_results"), style="body_medium")
-        self._empty_state_label.setStyleSheet(f"color: {ds.p.text_disabled};")
+        self._empty_state_label.setStyleSheet(f"color: {p.text_disabled};")
         self._empty_state_label.setAlignment(Qt.AlignCenter)
         self._empty_state_label.setWordWrap(True)
         es_layout.addWidget(self._empty_state_label)
         self._empty_state.hide()
-        rp_layout.addWidget(self._empty_state, 1)
-        content.addWidget(self._results_panel, 1)
+        rc_layout.addWidget(self._empty_state, 1)
 
-        # ── Panneau détail (droite) — photo + infos ──
+        content.addWidget(self._results_card, 3)
+
+        # ── Panneau droit : detail eleve ──
         self._detail_panel = M3Card(variant=CardVariant.ELEVATED, parent=self)
         dp_layout = self._detail_panel.content_layout()
         dp_layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
         dp_layout.setSpacing(ds.space_md)
 
-        # Photo + infos en ligne
+        # Photo + badges
         info_row = QHBoxLayout()
         info_row.setSpacing(ds.space_sm)
 
         self._detail_photo = QLabel()
         self._pw, self._ph = ds.sp(SpacingToken.XXXL) + ds.sp(SpacingToken.MD), ds.sp(SpacingToken.XXXL)
         self._detail_photo.setFixedSize(self._pw, self._ph)
-        self._detail_photo.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
+        self._detail_photo.setStyleSheet(f"background: {p.primary_container}; border-radius: {ds.radius_sm}px;")
         self._detail_photo.setAlignment(Qt.AlignCenter)
         self._detail_photo.setCursor(Qt.PointingHandCursor)
-        # Q4 : info-bulle sur la zone cliquable
         self._detail_photo.setToolTip(_("student_form.open_file"))
         self._detail_photo.installEventFilter(self)
         info_row.addWidget(self._detail_photo)
 
+        # Badges D/M/P/E
+        self._detail_badges: dict[str, QLabel] = {}
+        badges_layout = QVBoxLayout()
+        badges_layout.setSpacing(3)
+        _badge_size = 24
+        for badge_key, letter, tooltip in [
+            ("dossier_valid", "D", _("student_form.badge_dossier")),
+            ("parent_valid",  "M", _("student_form.badge_medical")),
+            ("photo_valid",   "P", _("student_form.badge_photo")),
+            ("email_valid",   "E", _("student_form.badge_email")),
+        ]:
+            circle = QLabel(letter)
+            circle.setFixedSize(_badge_size, _badge_size)
+            circle.setAlignment(Qt.AlignCenter)
+            circle.setToolTip(tooltip)
+            circle.setStyleSheet(
+                f"background: {p.surface}; color: {p.error}; "
+                f"border: 2px solid {p.error}; "
+                f"font-weight: bold; font-size: 10px; border-radius: 12px;")
+            badges_layout.addWidget(circle)
+            self._detail_badges[badge_key] = circle
+        info_row.addLayout(badges_layout)
+
+        # Infos texte
         text_col = QVBoxLayout()
         text_col.setSpacing(ds.space_xxs)
-        # Ligne 1 : PRÉNOM (plus grand) + NOM (majuscules) — même header que le dialogue
         name_row = QHBoxLayout()
         name_row.setSpacing(ds.space_sm)
         self._detail_prenom_label = M3Label("—", style="headline_large")
-        self._detail_prenom_label.setStyleSheet(f"font-weight: bold; color: {ds.p.text_strong};")
+        self._detail_prenom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
         name_row.addWidget(self._detail_prenom_label)
         self._detail_nom_label = M3Label("", style="title_large")
-        self._detail_nom_label.setStyleSheet(f"font-weight: bold; color: {ds.p.text_strong};")
+        self._detail_nom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
         name_row.addWidget(self._detail_nom_label)
         name_row.addStretch()
         text_col.addLayout(name_row)
-
-        # Ligne 2 : Classe
         self._detail_classe_label = M3Label("", style="body_medium")
-        self._detail_classe_label.setStyleSheet(f"color: {ds.p.text_strong};")
+        self._detail_classe_label.setStyleSheet(f"color: {p.text_strong};")
         text_col.addWidget(self._detail_classe_label)
-
-        # Ligne 3 : Id
+        self._detail_naissance_label = M3Label("", style="body_medium")
+        self._detail_naissance_label.setStyleSheet(f"color: {p.text_strong};")
+        text_col.addWidget(self._detail_naissance_label)
         self._detail_id_label = M3Label("", style="body_medium")
-        self._detail_id_label.setStyleSheet(f"color: {ds.p.text_strong};")
+        self._detail_id_label.setStyleSheet(f"color: {p.text_strong};")
         text_col.addWidget(self._detail_id_label)
         text_col.addStretch()
         info_row.addLayout(text_col, 1)
@@ -261,305 +300,265 @@ class StudentForm(ThemedWidget):
         self._open_btn.clicked.connect(self._open_edit_dialog)
         self._open_btn.setMinimumWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.XL) + 9)
         dp_layout.addWidget(self._open_btn, 0, Qt.AlignCenter)
-
         dp_layout.addStretch()
 
         self._detail_panel.hide()
         content.addWidget(self._detail_panel, 1)
 
         layout.addLayout(content, 1)
-
-        ds.theme_changed.connect(self._restyle)
-        # Application initiale du style (hover M3, couleurs header/état vide) :
-        # pattern des vues Larc — _restyle n'est sinon déclenché que par theme_changed.
         self._restyle()
 
-    @safe_slot("Unknown._restyle")
+    @safe_slot("StudentForm._restyle")
     def _restyle(self):
+        p = ds.p
         if hasattr(self, "_results_table") and self._results_table:
-            # Q1 : state layer hover M3 sur les lignes
-            self._results_table.setStyleSheet(ds.table_qss() + f"M3TableWidget::item:hover {{ background: {ds.p.surface_variant}; }}")
+            self._results_table.setStyleSheet(ds.table_qss())
         if hasattr(self, "_detail_photo") and self._detail_photo:
-            self._detail_photo.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
+            self._detail_photo.setStyleSheet(f"background: {p.primary_container}; border-radius: {ds.radius_sm}px;")
         if hasattr(self, "_empty_state_label") and self._empty_state_label:
-            self._empty_state_label.setStyleSheet(f"color: {ds.p.text_disabled};")
-        if hasattr(self, "_search_status") and self._search_status:
-            self._search_status.setStyleSheet(f"color: {ds.p.text_strong};")
-        # Header élève : couleurs réactives au thème
-        if hasattr(self, "_detail_prenom_label") and self._detail_prenom_label:
-            for lbl in (self._detail_prenom_label, self._detail_nom_label):
-                lbl.setStyleSheet(f"font-weight: bold; color: {ds.p.text_strong};")
-            for lbl in (self._detail_classe_label, self._detail_id_label):
-                lbl.setStyleSheet(f"color: {ds.p.text_strong};")
+            self._empty_state_label.setStyleSheet(f"color: {p.text_disabled};")
+        for lbl_attr in ("_detail_prenom_label", "_detail_nom_label", "_detail_classe_label",
+                         "_detail_naissance_label", "_detail_id_label"):
+            lbl = getattr(self, lbl_attr, None)
+            if lbl:
+                lbl.setStyleSheet(f"color: {p.text_strong};")
+        if hasattr(self, "_detail_prenom_label"):
+            self._detail_prenom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
+            self._detail_nom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
+        if hasattr(self, "_inp_nom") and self._inp_nom:
+            self._inp_nom.setStyleSheet(ds.flat_input_qss())
+        if hasattr(self, "_inp_prenom") and self._inp_prenom:
+            self._inp_prenom.setStyleSheet(ds.flat_input_qss())
+        if hasattr(self, "_current_student") and self._current_student:
+            self._refresh_detail_badges(self._current_student["id"])
 
     # ──────────── Recherche ────────────
 
-    @safe_slot("StudentForm.on_search")
     def _on_search(self, checked: bool = False):
-        """
-        Déclenche la recherche quand l'utilisateur appuie sur Entrée ou clique Rechercher.
-
-        Args:
-            checked: Ignoré (requis par le signal clicked(bool) de QPushButton)
-        """
-        query = self._search_input.text().strip()
-        if not query:
-            QMessageBox.information(self, _("student_form.search_info_title"), _("student_form.search_info_msg"))
+        nom = self._inp_nom.text().strip()
+        prenom = self._inp_prenom.text().strip()
+        if not nom and not prenom:
             return
-        self.search(query)
+        self._execute_search(nom, prenom)
 
-    def search(self, query: str):
-        """
-        Recherche des élèves par nom, prénom, email ou classe.
-
-        Les résultats sont affichés dans le panneau de gauche.
-        """
+    def _execute_search(self, last_name: str, first_name: str):
+        """Recherche les eleves par nom et/ou prenom."""
         conn = db.server_conn
         if not conn:
-            QMessageBox.warning(self, _("common.dialog.error_title"), _("student_form.error.no_connection"))
             return
-
-        from psycopg2 import errors as pg_errors
-
-        # Q4 : indicateur de chargement pendant la requête
-        self._search_status.setText(_("student_form.searching"))
-        self._search_status.show()
+        # Skeleton loading
+        self._results_table.hide()
+        self._empty_state.hide()
+        self._detail_panel.hide()
+        self._search_skeleton.show()
+        self._search_skeleton.start()
         QApplication.processEvents()
         try:
             cur = conn.cursor()
-            like = f"%{query}%"
-            try:
-                cur.execute(
-                    """
-                    SELECT
-                        s.aecuser_ptr_id AS id,
-                        aec.last_name, aec.first_name,
-                        aec.email, aec.emailperso,
-                        aec.tel_smartphone_1, aec.tel_maison,
-                        c.label AS classroom,
-                        aec.date_joined, aec.date_entree, aec.date_of_birth, aec.fk_foyer_id,
-                        aec.fk_gender_id, s.s_classroom_id,
-                        s.notes, s.notes_json,
-                        f.address_line1, f.address_line2, f.postal_code,
-                        f.city, f.country,
-                        f.phone AS foyer_phone, f.email AS foyer_email
-                    FROM larcauth_student s
-                    JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
-                    JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-                    LEFT JOIN foyer f ON f.id = aec.fk_foyer_id
-                    WHERE s.enabled = TRUE
-                      AND (aec.last_name ILIKE %s OR aec.first_name ILIKE %s
-                        OR aec.email ILIKE %s OR c.label ILIKE %s)
-                    ORDER BY aec.last_name, aec.first_name
-                    LIMIT 200
-                """,
-                    (
-                        like,
-                        like,
-                        like,
-                        like,
-                    ),
-                )
-            except pg_errors.UndefinedColumn:
-                cur.execute(
-                    """
-                    SELECT
-                        s.aecuser_ptr_id AS id,
-                        aec.last_name, aec.first_name,
-                        aec.email, aec.emailperso,
-                        aec.tel_smartphone_1, aec.tel_maison,
-                        c.label AS classroom,
-                        aec.date_joined, aec.date_entree, aec.date_of_birth, aec.fk_foyer_id,
-                        aec.fk_gender_id, s.s_classroom_id,
-                        NULL AS notes, NULL AS notes_json,
-                        f.address_line1, f.address_line2, f.postal_code,
-                        f.city, f.country,
-                        f.phone AS foyer_phone, f.email AS foyer_email
-                    FROM larcauth_student s
-                    JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
-                    JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-                    LEFT JOIN foyer f ON f.id = aec.fk_foyer_id
-                    WHERE s.enabled = TRUE
-                      AND (aec.last_name ILIKE %s OR aec.first_name ILIKE %s
-                        OR aec.email ILIKE %s OR c.label ILIKE %s)
-                    ORDER BY aec.last_name, aec.first_name
-                    LIMIT 200
-                """,
-                    (
-                        like,
-                        like,
-                        like,
-                        like,
-                    ),
-                )
-
-            cols = [desc[0] for desc in cur.description]
-            self._results = [dict(zip(cols, row)) for row in cur.fetchall()]
+            like_nom = f"%{last_name}%" if last_name else "%"
+            like_prenom = f"%{first_name}%" if first_name else "%"
+            cur.execute(
+                """
+                SELECT aec.id, aec.last_name, aec.first_name,
+                       c.label AS classroom, aec.date_of_birth,
+                       COALESCE(s.validation, '{}'::jsonb) AS validation
+                FROM larcauth_aecuser aec
+                JOIN larcauth_student s ON s.aecuser_ptr_id = aec.id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                WHERE s.enabled = TRUE
+                  AND aec.last_name ILIKE %s AND aec.first_name ILIKE %s
+                ORDER BY aec.last_name, aec.first_name
+                LIMIT 200
+            """, (like_nom, like_prenom))
+            self._results = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
             self._populate_results()
-
         except Exception as e:
-            log(f"StudentForm.search: {e}")
-            QMessageBox.critical(self, _("common.dialog.error_title"), str(e))
+            log(f"StudentForm._execute_search: {e}")
         finally:
-            self._search_status.hide()
+            self._search_skeleton.stop()
+            self._search_skeleton.hide()
 
     def _populate_results(self):
-        """Remplit le tableau des résultats de recherche."""
+        """Remplit le tableau : Nom | Prenom | Classe | Naissance | D | M | P | E."""
         self._results_table.setRowCount(0)
         for r in self._results:
             row = self._results_table.rowCount()
             self._results_table.insertRow(row)
-            self._results_table.setItem(row, 0, QTableWidgetItem(f"{r['last_name']} {r['first_name']}"))
-            self._results_table.setItem(row, 1, QTableWidgetItem(r.get("classroom", "")))
-            self._results_table.setItem(row, 2, QTableWidgetItem(r.get("email", "")))
-            self._results_table.setItem(row, 3, QTableWidgetItem(str(r["id"])))
-
-        self._results_table.resizeColumnsToContents()
+            self._results_table.setItem(row, self._COL_NOM, QTableWidgetItem((r.get("last_name") or "").upper()))
+            self._results_table.setItem(row, self._COL_PRENOM, QTableWidgetItem(r.get("first_name") or ""))
+            self._results_table.setItem(row, self._COL_CLASSE, QTableWidgetItem(r.get("classroom") or ""))
+            naissance = r.get("date_of_birth")
+            naissance_str = str(naissance)[:10] if naissance else "—"
+            self._results_table.setItem(row, self._COL_NAISSANCE, QTableWidgetItem(naissance_str))
+            # Badges validation
+            val = r.get("validation") or {}
+            if isinstance(val, str):
+                val = _json.loads(val) if val else {}
+            for flag_key, col_idx, letter in [
+                ("dossier", self._COL_D, "D"), ("parent", self._COL_M, "M"),
+                ("photo", self._COL_P, "P"), ("email", self._COL_E, "E"),
+            ]:
+                entry = val.get(flag_key, {}) if isinstance(val, dict) else {}
+                ok = entry.get("ok", False) if isinstance(entry, dict) else False
+                badge = QLabel(letter)
+                badge.setAlignment(Qt.AlignCenter)
+                if ok:
+                    badge.setStyleSheet(
+                        f"background: {ds.p.success}; color: #FFFFFF; font-weight: bold; "
+                        f"font-size: 8px; border-radius: 9px; padding: 1px;")
+                else:
+                    badge.setStyleSheet(
+                        f"background: transparent; color: {ds.p.error}; font-weight: bold; "
+                        f"font-size: 8px; border: 1px solid {ds.p.error}; border-radius: 9px; padding: 1px;")
+                self._results_table.setCellWidget(row, col_idx, badge)
+            self._results_table.setItem(row, self._COL_ID, QTableWidgetItem(str(r["id"])))
         count = len(self._results)
         self._results_label.setText(_("student_form.results_label").format(count=count))
-
         if count == 0:
-            # Q2 : état vide inline — pas de popup modal
             self._detail_panel.hide()
-            self._results_table.hide()
             self._empty_state.show()
         else:
             self._results_table.show()
             self._empty_state.hide()
             if count == 1:
-                # Sélection automatique si un seul résultat
                 self._results_table.selectRow(0)
 
-    # ──────────── Affichage du détail ────────────
+    # ──────────── Affichage du detail ────────────
 
     @safe_slot("StudentForm.on_result_selected")
     def _on_result_selected(self):
-        """Sélection d'un résultat → ouvre la popup d'édition."""
         rows = self._results_table.selectedItems()
         if not rows:
             return
-        student_id = int(self._results_table.item(rows[0].row(), 3).text())
-        self._open_student_dialog(student_id)
-
-    def _open_student_dialog(self, student_id: int, force_refresh: bool = False):
-        """Ouvre la popup d'édition pour un élève."""
-        data = None
-        if not force_refresh:
-            data = next((r for r in self._results if r["id"] == student_id), None)
-        conn = db.server_conn
-        if not conn:
+        r = rows[0].row()
+        id_item = self._results_table.item(r, self._COL_ID)
+        if not id_item:
             return
-        from psycopg2 import errors as pg_errors
-
-        try:
-            cur = conn.cursor()
-            try:
-                cur.execute(
-                    """
-                    SELECT
-                        s.aecuser_ptr_id AS id,
-                        aec.last_name, aec.first_name, aec.email,
-                        aec.emailperso, aec.tel_smartphone_1, aec.tel_maison,
-                        c.label AS classroom, aec.date_joined,
-                        aec.date_entree,
-                        aec.date_of_birth,
-                        aec.fk_foyer_id, aec.fk_gender_id,
-                        s.s_classroom_id, s.notes, s.notes_json,
-                        f.address_line1, f.address_line2, f.postal_code,
-                        f.city, f.country, f.phone AS foyer_phone, f.email AS foyer_email
-                    FROM larcauth_student s
-                    JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
-                    JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-                    LEFT JOIN foyer f ON f.id = aec.fk_foyer_id
-                    WHERE s.aecuser_ptr_id = %s
-                """,
-                    (student_id,),
-                )
-            except pg_errors.UndefinedColumn:
-                cur.execute(
-                    """
-                    SELECT
-                        s.aecuser_ptr_id AS id,
-                        aec.last_name, aec.first_name, aec.email,
-                        aec.emailperso, aec.tel_smartphone_1, aec.tel_maison,
-                        c.label AS classroom, aec.date_joined,
-                        aec.date_entree,
-                        aec.date_of_birth,
-                        aec.fk_foyer_id, aec.fk_gender_id,
-                        s.s_classroom_id, NULL AS notes, NULL AS notes_json,
-                        f.address_line1, f.address_line2, f.postal_code,
-                        f.city, f.country, f.phone AS foyer_phone, f.email AS foyer_email
-                    FROM larcauth_student s
-                    JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
-                    JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-                    LEFT JOIN foyer f ON f.id = aec.fk_foyer_id
-                    WHERE s.aecuser_ptr_id = %s
-                """,
-                    (student_id,),
-                )
-            cols = [desc[0] for desc in cur.description]
-            row = cur.fetchone()
-            if not row:
-                return
-            data = dict(zip(cols, row))
-        except Exception as e:
-            log(f"StudentForm._open_student_dialog: {e}")
+        student_id = int(id_item.text())
+        # Trouver les donnees dans self._results
+        data = next((x for x in self._results if x["id"] == student_id), None)
+        if not data:
             return
-
         self._current_student = data
         self._update_info_card(data)
         self._detail_panel.show()
 
     def _update_info_card(self, data: dict):
-        """Met à jour la vignette info."""
+        """Met a jour la vignette info."""
         sid = data["id"]
         px = QPixmap(get_photo_path(sid))
         if px.isNull():
-            px = _make_avatar(data["last_name"], data["first_name"], 160)
+            px = _make_avatar(data.get("last_name", ""), data.get("first_name", ""), 160)
         else:
             px = px.scaled(self._pw, self._ph, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._detail_photo.setPixmap(px)
         self._detail_prenom_label.setText(data.get("first_name", "") or "")
         self._detail_nom_label.setText((data.get("last_name", "") or "").upper())
         self._detail_classe_label.setText(_("student_form.class_label").format(label=data.get("classroom", "—")))
+        naissance = data.get("date_of_birth")
+        naissance_str = str(naissance)[:10] if naissance else "—"
+        self._detail_naissance_label.setText(_("student_form.birth_label").format(date=naissance_str))
         self._detail_id_label.setText(_("student_form.id_label").format(id=sid))
+        self._refresh_detail_badges(sid)
+
+    def _refresh_detail_badges(self, sid: int):
+        """Colore les 4 cercles D/M/P/E selon les flags de validation."""
+        if not hasattr(self, "_detail_badges") or not self._detail_badges:
+            return
+        conn = db.server_conn
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT validation FROM larcauth_student WHERE aecuser_ptr_id = %s", (sid,))
+            row = cur.fetchone()
+            val = row[0] if row and row[0] else {}
+            if isinstance(val, str):
+                val = _json.loads(val)
+            for flag_key, (badge_key, circle) in [
+                ("dossier", ("dossier_valid", self._detail_badges.get("dossier_valid"))),
+                ("parent",  ("parent_valid",  self._detail_badges.get("parent_valid"))),
+                ("photo",   ("photo_valid",   self._detail_badges.get("photo_valid"))),
+                ("email",   ("email_valid",   self._detail_badges.get("email_valid"))),
+            ]:
+                if circle is None:
+                    continue
+                entry = val.get(flag_key, {}) if isinstance(val, dict) else {}
+                ok = entry.get("ok", False)
+                if ok:
+                    circle.setStyleSheet(
+                        f"background: {ds.p.success}; color: {ds.p.on_error if hasattr(ds.p, 'on_error') else '#FFFFFF'}; "
+                        f"border: 2px solid {ds.p.success}; "
+                        f"font-weight: bold; font-size: 10px; border-radius: 12px;")
+                else:
+                    circle.setStyleSheet(
+                        f"background: {ds.p.surface}; color: {ds.p.error}; "
+                        f"border: 2px solid {ds.p.error}; "
+                        f"font-weight: bold; font-size: 10px; border-radius: 12px;")
+        except Exception as e:
+            log(f"StudentForm._refresh_detail_badges: {e}")
 
     @safe_slot("StudentForm.open_edit_dialog")
     def _open_edit_dialog(self):
-        """Ouvre la popup d'édition pour l'élève courant."""
         if not self._current_student:
             return
         dlg = StudentEditDialog(self._current_student, self)
         if dlg.exec():
-            self.search(self._search_input.text().strip())
-            self._open_student_dialog(self._current_student["id"], force_refresh=True)
+            # Re-afficher le detail frais
+            self._refresh_current_student()
 
-    @safe_slot("StudentForm.open_create_dialog")
-    def _open_create_dialog(self):
-        dlg = StudentCreateDialog(self)
-        dlg.exec()
+    def _refresh_current_student(self):
+        """Recharge les donnees de l'eleve courant depuis la DB."""
+        if not self._current_student:
+            return
+        sid = self._current_student["id"]
+        conn = db.server_conn
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT aec.id, aec.last_name, aec.first_name,
+                       c.label AS classroom, aec.date_of_birth,
+                       COALESCE(s.validation, '{}'::jsonb) AS validation
+                FROM larcauth_aecuser aec
+                JOIN larcauth_student s ON s.aecuser_ptr_id = aec.id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                WHERE aec.id = %s
+            """, (sid,))
+            row = cur.fetchone()
+            if row:
+                self._current_student = dict(zip(
+                    ["id", "last_name", "first_name", "classroom", "date_of_birth", "validation"], row))
+                self._update_info_card(self._current_student)
+                # Recharger aussi dans self._results
+                for i, r in enumerate(self._results):
+                    if r["id"] == sid:
+                        self._results[i] = dict(self._current_student)
+                        break
+        except Exception as e:
+            log(f"StudentForm._refresh_current_student: {e}")
 
     def eventFilter(self, obj, event):
-        # Garde getattr : l'eventFilter est installé sur _results_table AVANT la
-        # création de _detail_photo (pendant _init_ui) → ne jamais y accéder sans garde.
         photo = getattr(self, "_detail_photo", None)
         if photo is not None and obj == photo and event.type() == QEvent.MouseButtonPress:
             self._open_edit_dialog()
             return True
-        # Q3 : Entrée/Retour sur la ligne sélectionnée → ouvrir la fiche
         if obj == self._results_table and event.type() == QEvent.KeyPress:
             if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if self._results_table.selectedItems():
-                    self._open_edit_dialog()
-                    return True
+                self._open_edit_dialog()
+                return True
         return super().eventFilter(obj, event)
 
     def showEvent(self, event):
-        """Q3 : focus initial sur le champ de recherche (une seule fois)."""
         super().showEvent(event)
         if not getattr(self, "_focus_once", False):
             self._focus_once = True
-            self._search_input.setFocus()
+            if hasattr(self, "_inp_nom") and self._inp_nom:
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(50, self._inp_nom.setFocus)
 
 
 # ──────────────────────────────────────────────
@@ -733,14 +732,12 @@ class StudentEditDialog(ThemedDialog):
         self._inp_date_joined.setFixedHeight(_fh)
         self._inp_date_joined.setDisplayFormat("yyyy-MM-dd")
         self._inp_date_joined.setCalendarPopup(True)
-        self._inp_date_joined.setSpecialValueText(" ")
-        self._inp_date_joined.setDate(QDate())
+        self._inp_date_joined.setDate(QDate.currentDate())
         self._inp_date = M3DateEdit()
         self._inp_date.setFixedHeight(_fh)
         self._inp_date.setDisplayFormat("yyyy-MM-dd")
         self._inp_date.setCalendarPopup(True)
-        self._inp_date.setSpecialValueText(" ")
-        self._inp_date.setDate(QDate())
+        self._inp_date.setDate(QDate.currentDate())
         self._inp_genre = M3ComboBox()
         self._inp_genre.setFixedHeight(_fh)
         self._load_genders()
@@ -748,8 +745,6 @@ class StudentEditDialog(ThemedDialog):
         self._inp_birthdate.setFixedHeight(_fh)
         self._inp_birthdate.setDisplayFormat("yyyy-MM-dd")
         self._inp_birthdate.setCalendarPopup(True)
-        self._inp_birthdate.setSpecialValueText(" ")
-        self._inp_birthdate.setDate(QDate())
         self._inp_addr1 = M3TextEdit()
         self._inp_addr1.setFixedHeight(ds.sp(SpacingToken.XXXL))
         self._inp_addr1.setPlaceholderText(_("student_form.street_placeholder"))
@@ -777,132 +772,134 @@ class StudentEditDialog(ThemedDialog):
             self._inp_pays,
         ):
             w.setStyleSheet(ds.flat_input_qss())
-        for w in (self._inp_date_joined, self._inp_date, self._inp_birthdate, self._inp_genre):
+        for w in (self._inp_date_joined, self._inp_date, self._inp_birthdate):
             w.setStyleSheet(
                 f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; "
-                f"padding: {ds.space_md}px; color: {ds.p.text_strong}; background: {ds.p.surface}; "
+                f"padding: {ds.space_xxs}px {ds.space_xs}px; color: {ds.p.text_strong}; background: {ds.p.surface}; "
                 f"QDateEdit QLineEdit {{ color: {ds.p.text_strong}; background: {ds.p.surface}; }}"
             )
-            w.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.MD))
+            w.setMinimumWidth(ds.sp(SpacingToken.XXXL))
 
-        # Sidebar verticale + QStackedWidget (remplace les onglets)
-        nav_row = QHBoxLayout()
-        nav_row.setSpacing(ds.sp(SpacingToken.SM))
-        nav_side = QVBoxLayout()
-        nav_side.setSpacing(ds.space_sm)
-        nav_side.setContentsMargins(0, 0, ds.sp(SpacingToken.SM), 0)
+        # ═══════════════════════════════════════════════════════════
+        #   Helpers de construction de sections (cartes responsives)
+        # ═══════════════════════════════════════════════════════════
 
-        self._nav_btns: list[M3Button] = []
+        def _section_card(title: str, icon_name: str):
+            """Carte de section avec icône + titre + séparateur."""
+            card = M3Card(variant=CardVariant.ELEVATED)
+            card.setStyleSheet(
+                f"M3Card {{ background: {ds.p.surface}; "
+                f"border: 1px solid {ds.p.outline_variant}; "
+                f"border-radius: {ds.radius_md}px; }}")
+            cl = card.content_layout()
+            cl.setSpacing(ds.space_sm)
+            cl.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+            hdr = QHBoxLayout()
+            hdr.setSpacing(ds.space_xs)
+            icon_lbl = QLabel()
+            icon_lbl.setPixmap(md3_icon(icon_name, color=ds.p.primary, size=20).pixmap(20, 20))
+            hdr.addWidget(icon_lbl)
+            title_lbl = M3Label(title, style="title_medium")
+            title_lbl.setStyleSheet(f"color: {ds.p.text_strong}; font-weight: bold;")
+            hdr.addWidget(title_lbl)
+            hdr.addStretch()
+            cl.addLayout(hdr)
+            sep = M3Frame()
+            sep.setFixedHeight(1)
+            sep.setStyleSheet(f"background: {ds.p.outline_variant};")
+            cl.addWidget(sep)
+            return card, cl
 
-        # --- Page 1 : Identité & Contact (redesign M3Cards + Fibonacci) ---
-        p1 = M3Frame()
-        p1_layout = QVBoxLayout(p1)
-        p1_layout.setSpacing(ds.sp(SpacingToken.MD))
+        def _field_row(label: str, widget, is_date: bool = False):
+            """Label au-dessus du champ."""
+            row = QVBoxLayout()
+            row.setSpacing(ds.space_xxs)
+            lbl = M3Label(label, style="label_small")
+            lbl.setStyleSheet(f"color: {ds.p.text_soft}; font-weight: bold;")
+            row.addWidget(lbl)
+            widget.setMinimumHeight(ds.field_height)
+            if not is_date:
+                widget.setStyleSheet(ds.flat_input_qss())
+            row.addWidget(widget)
+            return row
 
-        # --- Carte Identité ---
-        id_card = M3Card(variant=CardVariant.ELEVATED)
-        id_cl = id_card.content_layout()
-        id_cl.setSpacing(ds.sp(SpacingToken.SM))
-        id_cl.addWidget(M3Label(_("student_form.tab_identity"), style="title_small"))
+        # ═══════════════════════════════════════════════════════════
+        #   ScrollArea : toutes les sections en single-page scrollable
+        # ═══════════════════════════════════════════════════════════
+
+        scroll = M3ScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            f"M3ScrollArea {{ background: {ds.p.background}; border: none; }}")
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet(f"background: {ds.p.background};")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(ds.space_md)
+        scroll_layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+
+        self._section_cards: list[M3Card] = []
+
+        # ── 1. Identité ──
+        id_card, id_cl = _section_card(_("student_form.tab_identity"), "person")
         id_grid = QGridLayout()
-        id_grid.setSpacing(ds.sp(SpacingToken.SM))
-        id_grid.setColumnStretch(0, 1)
-        id_grid.setColumnStretch(1, 1)
-        r = 0
-        id_grid.addWidget(_lbl(_("student_form.first_name_label")), r, 0)
-        id_grid.addWidget(_lbl(_("student_form.last_name_label")), r, 1)
-        r += 1
-        id_grid.addWidget(self._inp_prenom, r, 0)
-        id_grid.addWidget(self._inp_nom, r, 1)
-        r += 1
-        id_grid.addWidget(_lbl(_("student_form.gender_label")), r, 0)
-        r += 1
-        id_grid.addWidget(self._inp_genre, r, 0)
-        self._inp_genre.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.XL))
+        id_grid.setSpacing(ds.space_md)
+        id_grid.setColumnStretch(0, 1); id_grid.setColumnStretch(1, 1); id_grid.setColumnStretch(2, 1)
+        id_grid.addLayout(_field_row(_("student_form.first_name_label"), self._inp_prenom), 0, 0)
+        id_grid.addLayout(_field_row(_("student_form.last_name_label"), self._inp_nom), 0, 1)
+        id_grid.addLayout(_field_row(_("student_form.gender_label"), self._inp_genre), 0, 2)
+        id_grid.addLayout(_field_row(_("student_form.arrival_label"), self._inp_date_joined, is_date=True), 1, 0)
+        id_grid.addLayout(_field_row(_("student_form.entry_date"), self._inp_date, is_date=True), 1, 1)
+        id_grid.addLayout(_field_row(_("student_form.birth_date"), self._inp_birthdate, is_date=True), 1, 2)
         id_cl.addLayout(id_grid)
-        p1_layout.addWidget(id_card)
+        scroll_layout.addWidget(id_card)
+        self._section_cards.append(id_card)
 
-        # --- Carte Dates (3 dates empilées) ---
-        dt_card = M3Card(variant=CardVariant.ELEVATED)
-        dt_cl = dt_card.content_layout()
-        dt_cl.setSpacing(ds.sp(SpacingToken.SM))
-        dt_cl.addWidget(M3Label("Dates", style="title_small"))
-        # 6 colonnes : dates dans les 3 premières, vide à droite
-        dt_grid = QGridLayout()
-        dt_grid.setSpacing(ds.sp(SpacingToken.SM))
-        for i in range(6):
-            dt_grid.setColumnStretch(i, 1)
-        for row, (lbl, widget) in enumerate(
-            [
-                (_("student_form.arrival_label"), self._inp_date_joined),
-                (_("student_form.entry_date"), self._inp_date),
-                (_("student_form.birth_date"), self._inp_birthdate),
-            ]
-        ):
-            dt_grid.addWidget(M3Label(lbl, style="body_medium"), row * 2, 0, 1, 3)
-            dt_grid.addWidget(widget, row * 2 + 1, 0, 1, 3)
-        dt_cl.addLayout(dt_grid)
-        p1_layout.addWidget(dt_card)
-
-        # --- Carte Contact ---
-        ct_card = M3Card(variant=CardVariant.ELEVATED)
-        ct_cl = ct_card.content_layout()
-        ct_cl.setSpacing(ds.sp(SpacingToken.SM))
-        ct_cl.addWidget(M3Label("Contact", style="title_small"))
+        # ── 2. Contact ──
+        ct_card, ct_cl = _section_card("Contact", "description")
         ct_grid = QGridLayout()
-        ct_grid.setSpacing(ds.sp(SpacingToken.SM))
-        ct_grid.setColumnStretch(0, 1)
-        ct_grid.setColumnStretch(1, 1)
-        r = 0
-        ct_grid.addWidget(_lbl(_("student_form.email_label")), r, 0)
-        ct_grid.addWidget(_lbl(_("student_form.email_personal")), r, 1)
-        r += 1
-        ct_grid.addWidget(self._inp_email, r, 0)
-        ct_grid.addWidget(self._inp_emailperso, r, 1)
-        r += 1
-        ct_grid.addWidget(_lbl(_("student_form.phone_mobile")), r, 0)
-        ct_grid.addWidget(_lbl(_("student_form.phone_fixed")), r, 1)
-        r += 1
-        ct_grid.addWidget(self._inp_tel, r, 0)
-        ct_grid.addWidget(self._inp_tel2, r, 1)
+        ct_grid.setSpacing(ds.space_md)
+        ct_grid.setColumnStretch(0, 1); ct_grid.setColumnStretch(1, 1)
+        ct_grid.addLayout(_field_row(_("student_form.email_label"), self._inp_email), 0, 0)
+        ct_grid.addLayout(_field_row(_("student_form.email_personal"), self._inp_emailperso), 0, 1)
+        ct_grid.addLayout(_field_row(_("student_form.phone_mobile"), self._inp_tel), 1, 0)
+        ct_grid.addLayout(_field_row(_("student_form.phone_fixed"), self._inp_tel2), 1, 1)
         ct_cl.addLayout(ct_grid)
-        p1_layout.addWidget(ct_card)
+        scroll_layout.addWidget(ct_card)
+        self._section_cards.append(ct_card)
 
-        p1_layout.addStretch()
+        # ── 3. Adresse ──
+        ad_card, ad_cl = _section_card(_("student_form.address_title"), "home")
+        ad_grid = QGridLayout()
+        ad_grid.setSpacing(ds.space_md)
+        ad_grid.setColumnStretch(0, 1); ad_grid.setColumnStretch(1, 1); ad_grid.setColumnStretch(2, 1)
+        ad_grid.addLayout(_field_row(_("student_form.street_placeholder"), self._inp_addr1), 0, 0, 1, 3)
+        ad_grid.addLayout(_field_row(_("student_form.address_complement"), self._inp_addr2), 1, 0, 1, 3)
+        ad_grid.addLayout(_field_row(_("student_form.zip_label"), self._inp_cp), 2, 0)
+        ad_grid.addLayout(_field_row(_("student_form.city_label"), self._inp_ville), 2, 1)
+        ad_grid.addLayout(_field_row(_("student_form.country_label"), self._inp_pays), 2, 2)
+        ad_cl.addLayout(ad_grid)
+        scroll_layout.addWidget(ad_card)
+        self._section_cards.append(ad_card)
 
-        # --- Page 2 : Adresse & Parents (redesign M3Cards + Fibonacci) ---
-        p2_page = M3Frame()
-        p2_page_layout = QVBoxLayout(p2_page)
-        p2_page_layout.setSpacing(ds.sp(SpacingToken.MD))
-
-        # --- Carte Parents ---
-        par_card = M3Card(variant=CardVariant.ELEVATED)
-        par_cl = par_card.content_layout()
-        par_cl.setSpacing(ds.sp(SpacingToken.SM))
-        par_cl.addWidget(M3Label(_("student_form.parents_title"), style="title_small"))
-
+        # ── 4. Parents ──
+        par_card, par_cl = _section_card(_("student_form.parents_title"), "person")
         self._parents_table = M3TableWidget()
-        self._parents_table.set_headers(
-            [
-                _("student_form.parents_table_nom"),
-                _("student_form.parents_table_nature"),
-                _("student_form.parents_table_email"),
-                _("student_form.parents_table_phone"),
-            ]
-        )
+        self._parents_table.set_headers([
+            _("student_form.parents_table_nom"), _("student_form.parents_table_nature"),
+            _("student_form.parents_table_email"), _("student_form.parents_table_phone"),
+        ])
         self._parents_table.horizontalHeader().setStretchLastSection(True)
         self._parents_table.setEditTriggers(M3TableWidget.NoEditTriggers)
         self._parents_table.setSelectionBehavior(M3TableWidget.SelectRows)
         self._parents_table.setShowGrid(True)
-        hh = self._parents_table.horizontalHeader()
-        hh.setFixedHeight(ds.field_height)
+        self._parents_table.horizontalHeader().setFixedHeight(ds.field_height)
         self._parents_table.setStyleSheet(ds.table_qss())
         self._parents_table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
         self._parents_table.setMaximumHeight(ds.sp(SpacingToken.XXXL))
         par_cl.addWidget(self._parents_table)
 
         parent_tools = QHBoxLayout()
-        parent_tools.setSpacing(ds.sp(SpacingToken.SM))
+        parent_tools.setSpacing(ds.space_sm)
         add_par_btn = M3Button(_("student_form.add_parent"), variant=ButtonVariant.FILLED)
         add_par_btn.clicked.connect(self._add_parent_link)
         parent_tools.addWidget(add_par_btn)
@@ -917,53 +914,33 @@ class StudentEditDialog(ThemedDialog):
         parent_tools.addWidget(copy_btn)
         parent_tools.addStretch()
         par_cl.addLayout(parent_tools)
-        # Q2 — état vide INLINE (jamais de QMessageBox modal pour zéro résultat)
         self._addr_status = M3Label("", style="body_small")
         self._addr_status.setWordWrap(True)
         self._addr_status.setStyleSheet(f"color: {ds.p.text_disabled};")
         self._addr_status.hide()
         par_cl.addWidget(self._addr_status)
-        p2_page_layout.addWidget(par_card)
+        scroll_layout.addWidget(par_card)
+        self._section_cards.append(par_card)
 
-        # --- Carte Adresse ---
-        addr_card = M3Card(variant=CardVariant.ELEVATED)
-        addr_cl = addr_card.content_layout()
-        addr_cl.setSpacing(ds.sp(SpacingToken.SM))
-        addr_cl.addWidget(M3Label(_("student_form.address_title"), style="title_small"))
+        # ── 5. Dossiers ──
+        dos_card, dos_cl = _section_card(_("student_form.tab_documents"), "subject")
+        from LarcSecretaire.views.dossier_panel import DossierPanel
+        self._dossier_panel = DossierPanel(self._sid)
+        self._dossier_panel.entries_changed.connect(self._mark_dirty)
+        self._dossier_panel.setMinimumHeight(450)
+        self._dossier_panel.setMaximumHeight(650)
+        dos_cl.addWidget(self._dossier_panel)
+        scroll_layout.addWidget(dos_card)
+        self._section_cards.append(dos_card)
 
-        addr_cl.addWidget(self._inp_addr1)
-        addr_cl.addWidget(self._inp_addr2)
-        addr_grid = QGridLayout()
-        addr_grid.setSpacing(ds.sp(SpacingToken.SM))
-        addr_grid.setColumnStretch(0, 1)
-        addr_grid.setColumnStretch(1, 1)
-        addr_grid.addWidget(_lbl(_("student_form.zip_label")), 0, 0)
-        addr_grid.addWidget(_lbl(_("student_form.city_label")), 0, 1)
-        addr_grid.addWidget(self._inp_cp, 1, 0)
-        addr_grid.addWidget(self._inp_ville, 1, 1)
-        addr_grid.addWidget(_lbl(_("student_form.country_label")), 2, 0)
-        addr_grid.addWidget(self._inp_pays, 3, 0, 1, 2)
-        addr_cl.addLayout(addr_grid)
-        p2_page_layout.addWidget(addr_card)
-
-        p2_page_layout.addStretch()
-
-        # --- Page 3 : Événements ---
-        p3 = M3Frame()
-        p3_layout = QVBoxLayout(p3)
-        p3_layout.setSpacing(ds.sp(SpacingToken.SM))
-        evt_label = M3Label(_("student_form.events_title"), style="headline_large")
-        p3_layout.addWidget(evt_label)
+        # ── 6. Événements ──
+        evt_card, evt_cl = _section_card(_("student_form.events_title"), "event")
         self._evt_table = M3TableWidget()
-        self._evt_table.set_headers(
-            [
-                _("student_form.events_table_date"),
-                _("student_form.events_table_type"),
-                _("student_form.events_table_note"),
-                _("student_form.events_table_by"),
-                _("student_form.events_table_validated"),
-            ]
-        )
+        self._evt_table.set_headers([
+            _("student_form.events_table_date"), _("student_form.events_table_type"),
+            _("student_form.events_table_note"), _("student_form.events_table_by"),
+            _("student_form.events_table_validated"),
+        ])
         hh_evt = self._evt_table.horizontalHeader()
         hh_evt.setSectionResizeMode(0, M3HeaderView.Interactive)
         hh_evt.setSectionResizeMode(1, M3HeaderView.Interactive)
@@ -973,222 +950,181 @@ class StudentEditDialog(ThemedDialog):
         self._evt_table.setColumnWidth(0, ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.LG) + 34)
         self._evt_table.setColumnWidth(1, ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.MD) + 6)
         self._evt_table.setColumnWidth(3, ds.space_xxl)
-        self._evt_table.setShowGrid(True)
         self._evt_table.setStyleSheet(ds.table_qss())
         self._evt_table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
         self._evt_table.setEditTriggers(M3TableWidget.NoEditTriggers)
         self._evt_table.setSelectionBehavior(M3TableWidget.SelectRows)
         self._evt_table.setAlternatingRowColors(False)
-        p3_layout.addWidget(self._evt_table, 1)
-
-        # Bouton Ajouter événement
+        self._evt_table.setMaximumHeight(250)
+        evt_cl.addWidget(self._evt_table)
         evt_btn_row = QHBoxLayout()
         self._add_event_btn = M3Button(_("student_form.add_event"), variant=ButtonVariant.FILLED)
         self._add_event_btn.clicked.connect(self._on_add_event)
         evt_btn_row.addWidget(self._add_event_btn)
         evt_btn_row.addStretch()
-        p3_layout.addLayout(evt_btn_row)
+        evt_cl.addLayout(evt_btn_row)
+        scroll_layout.addWidget(evt_card)
+        self._section_cards.append(evt_card)
 
-        # --- Page 4 : Dossiers (sections + fichiers) ---
-        p4 = M3Frame()
-        p4_layout = QVBoxLayout(p4)
-        p4_layout.setContentsMargins(0, 0, 0, 0)
-        from LarcSecretaire.views.dossier_panel import DossierPanel
-
-        self._dossier_panel = DossierPanel(self._sid)
-        # Temps réel : toute mutation d'une entrée (ajout/édition/suppression)
-        # marque le dossier comme modifié et active l'indicateur « Enregistrer »,
-        # même sans changer d'onglet.
-        self._dossier_panel.entries_changed.connect(self._mark_dirty)
-        p4_layout.addWidget(self._dossier_panel, 1)
-
-        # --- Page 7 : Notes / Résultats ---
-        p7 = M3Frame()
-        p7_layout = QVBoxLayout(p7)
-        p7_layout.setSpacing(ds.sp(SpacingToken.SM))
-        p7_layout.addWidget(M3Label(_("student_form.grades_title"), style="title_small"))
-
-        # Accès aux répertoires drive : relevés + bulletins (intranet + cloud)
-        from LarcSecretaire.common.app_config import app_config as _acfg
-
-        drive_row = QHBoxLayout()
-        drive_row.setSpacing(ds.space_sm)
-        for dkey, dtitle_key in [("releves", "student_form.drive_releves"), ("bulletins", "student_form.drive_bulletins")]:
-            dcard = M3Card(variant=CardVariant.ELEVATED)
-            dcl = dcard.content_layout()
-            dcl.setSpacing(ds.space_sm)
-            dcl.addWidget(M3Label(_(dtitle_key), style="title_small"))
-            ddir = _acfg.get(f"{dkey}_dir", "")
-            durl = _acfg.get(f"{dkey}_cloud_url", "")
-            dir_lbl = M3Label(str(ddir), style="label_small")
-            dir_lbl.setWordWrap(True)
-            dcl.addWidget(dir_lbl)
-            btns = QHBoxLayout()
-            btns.setSpacing(ds.space_xs)
-            b_intra = M3Button(_("student_form.drive_intranet"), variant=ButtonVariant.TONAL)
-            b_intra.clicked.connect(lambda _=False, p=ddir: self._open_drive_dir(p))
-            btns.addWidget(b_intra)
-            b_cloud = M3Button(_("student_form.drive_cloud"), variant=ButtonVariant.FILLED)
-            b_cloud.clicked.connect(lambda _=False, u=durl: self._open_drive_cloud(u))
-            btns.addWidget(b_cloud)
-            btns.addStretch()
-            dcl.addLayout(btns)
-            drive_row.addWidget(dcard, 1)
-        p7_layout.addLayout(drive_row)
-
-        self._grades_table = M3TableWidget()
-        self._grades_table.set_headers(
-            [
-                _("student_form.grades_table_subject"),
-                _("student_form.grades_table_grade"),
-                _("student_form.grades_table_date"),
-                _("student_form.grades_table_comment"),
-            ]
-        )
-        hh_gr = self._grades_table.horizontalHeader()
-        for i in range(4):
-            hh_gr.setSectionResizeMode(i, M3HeaderView.Stretch)
-        self._grades_table.setStyleSheet(ds.table_qss())
-        self._grades_table.setEditTriggers(M3TableWidget.NoEditTriggers)
-        self._grades_table.setAlternatingRowColors(False)
-        p7_layout.addWidget(self._grades_table, 1)
-
-        # --- Page 8 : Photos ---
-        p8 = M3Frame()
-        p8_layout = QVBoxLayout(p8)
-        p8_layout.setSpacing(ds.sp(SpacingToken.MD))
-        p8_layout.setAlignment(Qt.AlignCenter)
-
-        # Photo en grand
+        # ── 7. Photos ──
+        photo_card, photo_cl = _section_card(_("student_form.tab_photos"), "add")
+        photo_box = QVBoxLayout()
+        photo_box.setAlignment(Qt.AlignCenter)
+        photo_box.setSpacing(ds.space_sm)
         self._photo_large = QLabel()
         self._photo_large.setFixedSize(ds.sp(SpacingToken.XXXL) * 2, ds.sp(SpacingToken.XXXL) * 2)
         self._photo_large.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
         self._photo_large.setAlignment(Qt.AlignCenter)
-        p8_layout.addWidget(self._photo_large, 0, Qt.AlignCenter)
-
-        # Bouton upload
-        photo_btn_row = QHBoxLayout()
-        photo_btn_row.setAlignment(Qt.AlignCenter)
+        photo_box.addWidget(self._photo_large, 0, Qt.AlignCenter)
         self._upload_photo_btn = M3Button(_("student_form.change_photo"), variant=ButtonVariant.FILLED)
         self._upload_photo_btn.clicked.connect(self._on_change_photo)
-        photo_btn_row.addWidget(self._upload_photo_btn)
-        p8_layout.addLayout(photo_btn_row)
-        p8_layout.addStretch()
+        photo_box.addWidget(self._upload_photo_btn, 0, Qt.AlignCenter)
+        photo_cl.addLayout(photo_box)
+        scroll_layout.addWidget(photo_card)
+        self._section_cards.append(photo_card)
 
-        # --- Page 5 : Confidentiel (restreint) ---
-        p5 = M3Frame()
-        p5_layout = QVBoxLayout(p5)
-        p5_layout.setSpacing(ds.sp(SpacingToken.SM))
+        # ── 8. Bulletins & Relevés ──
+        bul_card, bul_cl = _section_card(_("student_form.tab_bulletins"), "school")
+        from LarcSecretaire.common.app_config import app_config as _acfg
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(ds.space_md)
+        b_intra = M3Button(_("student_form.drive_intranet"), variant=ButtonVariant.FILLED)
+        b_intra.clicked.connect(lambda: (
+            self._open_drive_dir(_acfg.get("releves_dir", "")),
+            self._open_drive_dir(_acfg.get("bulletins_dir", ""))
+        ))
+        btn_row.addWidget(b_intra)
+        b_cloud = M3Button(_("student_form.drive_cloud"), variant=ButtonVariant.TONAL)
+        b_cloud.clicked.connect(lambda: (
+            self._open_drive_cloud(_acfg.get("releves_cloud_url", "")),
+            self._open_drive_cloud(_acfg.get("bulletins_cloud_url", ""))
+        ))
+        btn_row.addWidget(b_cloud)
+        btn_row.addStretch()
+        bul_cl.addLayout(btn_row)
+        scroll_layout.addWidget(bul_card)
+        self._section_cards.append(bul_card)
+
+        # ── 9. Confidentiel (restreint) ──
         from LarcSecretaire.common.session import UserRole
         from LarcSecretaire.common.session import session as _ses
-
+        conf_card, conf_cl = _section_card(_("student_form.tab_confidential"), "lock")
         if _ses.role in (UserRole.ADMIN, UserRole.COORD, UserRole.SECR):
-            conf_label = M3Label(_("student_form.confidential_notes"), style="headline_large")
-            p5_layout.addWidget(conf_label)
             conf_info = M3Label(_("student_form.confidential_desc"), style="body_medium")
-            conf_info.setStyleSheet(f"padding-bottom: {ds.sp(SpacingToken.SM)}px;")
             conf_info.setWordWrap(True)
-            p5_layout.addWidget(conf_info)
-            # Liste de documents confidentiels (description + pièces jointes),
-            # HORS des sections du dossier → notes_json["confidentiel"]
+            conf_cl.addWidget(conf_info)
             from LarcSecretaire.views.dossier_panel import ConfidentialPanel
-
             self._conf_panel = ConfidentialPanel(self._sid)
             self._conf_panel.entries_changed.connect(self._mark_dirty)
-            p5_layout.addWidget(self._conf_panel, 1)
+            self._conf_panel.setMaximumHeight(350)
+            conf_cl.addWidget(self._conf_panel)
         else:
             deny = M3Label(_("student_form.confidential_restricted"), style="title_small")
-            deny.setStyleSheet(f"padding: {ds.space_xl}px;")
             deny.setAlignment(Qt.AlignCenter)
             deny.setWordWrap(True)
-            p5_layout.addWidget(deny)
+            conf_cl.addWidget(deny)
+        scroll_layout.addWidget(conf_card)
+        self._section_cards.append(conf_card)
 
-        # Construire la sidebar + stack — avec NavButton (TONAL + icônes)
-        # page_map EXPLICITE : l'ordre d'append des pages (p1,p2,p3,p4,p7,p8,p5)
-        # diffère de l'ordre des onglets (p5=Confidentiel avant p7=Notes) → map directe.
-        self._nav_stack = M3StackedWidget()
-        # Onglet « Chronologie » : vue globale exposée par DossierPanel (Niveau 3),
-        # ajoutée juste après « Dossiers » → onglet complet du dialogue.
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        self._scroll = scroll
+
+        # ── Bandeau de validation (fixe, toujours visible en haut) ──
+        self._val_banner = QWidget()
+        self._val_banner.setStyleSheet(
+            f"background: {ds.p.surface_container_low if hasattr(ds.p, 'surface_container_low') else ds.p.surface_variant}; "
+            f"border: 1px solid {ds.p.outline_variant}; border-radius: {ds.radius_md}px; "
+            f"padding: {ds.space_sm}px;")
+        val_banner_layout = QHBoxLayout(self._val_banner)
+        val_banner_layout.setSpacing(ds.space_md)
+        val_banner_layout.setContentsMargins(ds.space_md, ds.space_sm, ds.space_md, ds.space_sm)
+
+        self._val_items: dict[str, tuple[QCheckBox, M3Label]] = {}
+        for key, label, icon_name in [
+            ("photo_valid", _("sec_main.kpi.no_photo"), "image"),
+            ("parent_valid", _("sec_main.kpi.no_parent"), "person"),
+            ("email_valid", _("sec_main.kpi.no_email"), "mail"),
+            ("dossier_valid", _("sec_main.kpi.no_doc"), "description"),
+        ]:
+            item_box = QVBoxLayout()
+            item_box.setSpacing(ds.space_xxs)
+            item_box.setAlignment(Qt.AlignCenter)
+            cb = QCheckBox(label)
+            cb.setStyleSheet(f"color: {ds.p.text_strong}; font-size: {ds.font_label_lg}px; "
+                           f"spacing: {ds.space_xs}px; font-weight: bold;")
+            cb.toggled.connect(lambda checked, k=key: self._on_flag_toggled(k, checked))
+            item_box.addWidget(cb, 0, Qt.AlignCenter)
+            who_lbl = M3Label(_("student_form.not_validated"), style="label_small")
+            who_lbl.setStyleSheet(f"color: {ds.p.text_disabled};")
+            who_lbl.setAlignment(Qt.AlignCenter)
+            item_box.addWidget(who_lbl, 0, Qt.AlignCenter)
+            val_banner_layout.addLayout(item_box)
+            self._val_items[key] = (cb, who_lbl)
+
+        # Ajouter le bandeau AVANT le scroll dans le layout
+        layout.addWidget(self._val_banner)
+        layout.addWidget(scroll, 1)
+
+        # ── Chronologie : popup modale (n'est plus un onglet) ──
+        self._dossier_panel.timeline_requested.connect(self._open_timeline_dialog)
         self._timeline_page = self._dossier_panel.timeline
-        nav_pages = [
-            (p1, "badge", _("student_form.tab_identity")),
-            (p2_page, "home", _("student_form.tab_address")),
-            (p3, "event", _("student_form.tab_events")),
-            (p4, "folder", _("student_form.tab_documents")),
-            (self._timeline_page, "timeline", _("dossier.timeline.title")),
-            (p5, "lock", _("student_form.tab_confidential")),
-            (p7, "school", _("student_form.tab_grades")),
-            (p8, "photo_camera", _("student_form.tab_photos")),
-        ]
-        icon_sz = theme_manager.image.icon_btn
-        self._dossier_nav_index = 0
-        self._timeline_nav_index = 0
-        for idx, (page, icon_name, label) in enumerate(nav_pages):
-            if page is p4:
-                self._dossier_nav_index = idx
-            if page is self._timeline_page:
-                self._timeline_nav_index = idx
-            btn = M3Button(label, variant=ButtonVariant.TONAL)
-            btn.setIcon(md3_icon(icon_name, color=theme_manager.palette.text_soft, size=icon_sz))
-            btn.setIconSize(QSize(icon_sz, icon_sz))
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setCheckable(True)
-            btn.setChecked(idx == 0)
-            btn.clicked.connect(lambda checked, i=idx: self._on_nav(i))
-            nav_side.addWidget(btn)
-            self._nav_btns.append(btn)
-            self._nav_stack.addWidget(page)
 
-        self._nav_stack.setCurrentIndex(0)
-        nav_side.addStretch()
-        nav_row.addLayout(nav_side)
-        nav_row.addWidget(self._nav_stack, 1)
-        layout.addLayout(nav_row, 1)
-        layout.addStretch()
-
-        # ── Chronologie : onglet complet + navigation depuis les sections ──
-        # Le bouton « Chronologie » du rail Dossiers ouvre l'onglet du dialogue.
-        self._dossier_panel.timeline_requested.connect(self._open_timeline_tab)
-        # Double-clic dans la timeline → retour onglet Dossiers + édition dans la section.
-        self._timeline_page.set_on_edit(self._edit_from_timeline)
-
-    @safe_slot("Unknown._restyle")
     def _restyle(self):
-        if hasattr(self, "_parents_table") and self._parents_table:
-            self._parents_table.setStyleSheet(ds.table_qss())
-        if hasattr(self, "_evt_table") and self._evt_table:
-            self._evt_table.setStyleSheet(ds.table_qss())
-        if hasattr(self, "_grades_table") and self._grades_table:
-            self._grades_table.setStyleSheet(ds.table_qss())
-        if hasattr(self, "_photo") and self._photo:
-            self._photo.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
-        if hasattr(self, "_photo_large") and self._photo_large:
-            self._photo_large.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
+        # Scroll area
+        if hasattr(self, "_scroll") and self._scroll:
+            self._scroll.setStyleSheet(
+                f"M3ScrollArea {{ background: {ds.p.background}; border: none; }}")
+            if self._scroll.widget():
+                self._scroll.widget().setStyleSheet(f"background: {ds.p.background};")
+        # Cartes de section
+        section_style = (
+            f"M3Card {{ background: {ds.p.surface}; "
+            f"border: 1px solid {ds.p.outline_variant}; "
+            f"border-radius: {ds.radius_md}px; }}")
+        for card in getattr(self, "_section_cards", []):
+            card.setStyleSheet(section_style)
+        # Tables
+        for attr in ("_parents_table", "_evt_table"):
+            t = getattr(self, attr, None)
+            if t:
+                t.setStyleSheet(ds.table_qss())
+        # Photos
+        for attr in ("_photo", "_photo_large"):
+            p = getattr(self, attr, None)
+            if p:
+                p.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
+        # Champs texte
         for w in self._inp_fields():
             w.setStyleSheet(ds.flat_input_qss())
+        # Champs date
         for w in self._date_fields():
             w.setStyleSheet(
                 f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; "
-                f"padding: {ds.space_md}px; color: {ds.p.text_strong}; background: {ds.p.surface}; "
-                f"QDateEdit QLineEdit {{ color: {ds.p.text_strong}; background: {ds.p.surface}; }}"
-            )
-            w.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.MD))
-        # Header élève : couleurs réactives au thème
+                f"padding: {ds.space_xs}px {ds.space_md}px; color: {ds.p.text_strong}; "
+                f"background: {ds.p.surface}; "
+                f"QDateEdit QLineEdit {{ color: {ds.p.text_strong}; background: {ds.p.surface}; }}")
+            w.setMinimumWidth(ds.sp(SpacingToken.XXXL))
+        # Header élève
         for lbl in (self._id_prenom, self._id_nom):
             lbl.setStyleSheet(f"font-weight: bold; color: {ds.p.text_strong};")
         for lbl in (self._id_classe, self._id_id):
             lbl.setStyleSheet(f"color: {ds.p.text_strong};")
-        if hasattr(self, "_addr_status") and self._addr_status:
-            self._addr_status.setStyleSheet(f"color: {ds.p.text_disabled};")
+        # Combo genre
         if hasattr(self, "_inp_genre") and self._inp_genre:
             self._inp_genre.setStyleSheet(
                 f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; "
-                f"padding: {ds.space_md}px; min-width: {ds.window_width * 3 // 20}px; "
-                f"color: {ds.p.text_strong};"
-            )
+                f"padding: {ds.space_xxs}px {ds.space_xs}px; min-width: {ds.window_width * 3 // 20}px; "
+                f"color: {ds.p.text_strong};")
             self._inp_genre.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.MD))
-        # Ré-appliquer l'indicateur dirty (libellé du bouton Enregistrer) après
-        # un changement de thème : sans effet de couleur, mais cohérent.
+        if hasattr(self, "_addr_status") and self._addr_status:
+            self._addr_status.setStyleSheet(f"color: {ds.p.text_disabled};")
+        # Bandeau de validation
+        if hasattr(self, "_val_banner") and self._val_banner:
+            self._val_banner.setStyleSheet(
+                f"background: {ds.p.surface_container_low if hasattr(ds.p, 'surface_container_low') else ds.p.surface_variant}; "
+                f"border: 1px solid {ds.p.outline_variant}; border-radius: {ds.radius_md}px; "
+                f"padding: {ds.space_sm}px;")
         if hasattr(self, "_save_btn") and self._save_btn:
             self._update_save_indicator()
 
@@ -1217,28 +1153,163 @@ class StudentEditDialog(ThemedDialog):
                 fields.append(getattr(self, attr))
         return fields
 
-    @safe_slot("StudentEditDialog.on_nav")
-    def _on_nav(self, index: int):
-        self._nav_stack.setCurrentIndex(index)
-        for i, btn in enumerate(self._nav_btns):
-            btn.setChecked(i == index)
-        # Rafraîchir la chronologie à chaque affichage de son onglet
-        if index == getattr(self, "_timeline_nav_index", None):
-            self._dossier_panel.refresh_timeline()
+    _VALIDATION_KEY_MAP = {
+        "photo_valid": "photo", "parent_valid": "parent",
+        "email_valid": "email", "dossier_valid": "dossier",
+    }
+    _CHECK_LABELS = {
+        "photo_valid":   ("sec_main.kpi.no_photo",  "student_form.check_photo"),
+        "parent_valid":  ("sec_main.kpi.no_parent",  "student_form.check_parent"),
+        "email_valid":   ("sec_main.kpi.no_email",   "student_form.check_email"),
+        "dossier_valid": ("sec_main.kpi.no_doc",     "student_form.check_dossier"),
+    }
 
-    @safe_slot("Unknown._open_timeline_tab")
-    def _open_timeline_tab(self):
-        """Bouton « Chronologie » du rail Dossiers → ouvre l'onglet chronologie."""
-        self._on_nav(self._timeline_nav_index)
+    def _on_flag_toggled(self, key: str, checked: bool):
+        """Enregistre le changement de flag de validation dans le JSONB."""
+        log(f"_on_flag_toggled: key={key} checked={checked} sid={self._sid}")
+        conn = db.server_conn
+        if not conn:
+            log("_on_flag_toggled: no DB connection")
+            return
+        from datetime import datetime as _dt
+        jsonb_key = self._VALIDATION_KEY_MAP.get(key, key)
+        entry = _json.dumps({"ok": checked, "by": session.user_id, "at": _dt.now().isoformat()})
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE larcauth_student SET validation = "
+                "COALESCE(validation, '{}'::jsonb) || jsonb_build_object(%s, %s::jsonb) "
+                "WHERE aecuser_ptr_id = %s",
+                (jsonb_key, entry, self._sid))
+            conn.commit()
+            log(f"_on_flag_toggled: OK rowcount={cur.rowcount}")
+        except Exception as e:
+            log(f"_on_flag_toggled: DB error: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            cb, _who = self._val_items.get(key, (None, None))
+            if cb:
+                cb.blockSignals(True)
+                cb.setChecked(not checked)
+                cb.blockSignals(False)
+            return
+        if key in self._val_items:
+            _cb, who_lbl = self._val_items[key]
+            # Changer le texte de la checkbox pour lever l'ambiguite
+            prob_key, ok_key = self._CHECK_LABELS.get(key, (None, None))
+            if prob_key and ok_key:
+                _cb.setText(_(ok_key) if checked else _(prob_key))
+                _cb.setStyleSheet(
+                    f"color: {ds.p.success if checked else ds.p.error}; "
+                    f"font-size: {ds.font_label_lg}px; spacing: {ds.space_xs}px; font-weight: bold;")
+            if checked:
+                who_lbl.setText(_("student_form.validated_by").format(name=session.full_name)
+                               if session.full_name else _("student_form.validated"))
+                who_lbl.setStyleSheet(f"color: {ds.p.success}; font-weight: bold;")
+            else:
+                who_lbl.setText(_("student_form.not_validated"))
+                who_lbl.setStyleSheet(f"color: {ds.p.text_disabled};")
+        self._update_photo_badge()
 
-    def _edit_from_timeline(self, entry: dict):
-        """Double-clic dans la chronologie → retour onglet Dossiers + édition dans la section."""
-        self._on_nav(self._dossier_nav_index)
-        self._dossier_panel.edit_from_timeline(entry)
+    def _refresh_val_banner(self):
+        """Recharge les flags de validation et les noms des validateurs depuis la DB."""
+        if not hasattr(self, "_val_items") or not self._val_items:
+            return
+        conn = db.server_conn
+        if not conn:
+            return
+        try:
+            import json as _json
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT validation FROM larcauth_student WHERE aecuser_ptr_id = %s", (self._sid,))
+            row = cur.fetchone()
+            val = row[0] if row and row[0] else {}
+            if isinstance(val, str):
+                val = _json.loads(val)
+            user_ids = set()
+            for flag_key, _checkbox_key in [
+                ("dossier", "dossier_valid"), ("photo", "photo_valid"),
+                ("email", "email_valid"), ("parent", "parent_valid"),
+            ]:
+                entry = val.get(flag_key, {}) if isinstance(val, dict) else {}
+                if entry.get("ok") and entry.get("by"):
+                    user_ids.add(int(entry["by"]))
+            names: dict[int, str] = {}
+            if user_ids:
+                cur.execute(
+                    "SELECT id, last_name || ' ' || first_name FROM larcauth_aecuser WHERE id IN %s",
+                    (tuple(user_ids),))
+                names = {uid: name for uid, name in cur.fetchall()}
+            for flag_key, checkbox_key in [
+                ("dossier", "dossier_valid"), ("photo", "photo_valid"),
+                ("email", "email_valid"), ("parent", "parent_valid"),
+            ]:
+                if checkbox_key not in self._val_items:
+                    continue
+                cb, who_lbl = self._val_items[checkbox_key]
+                # Retrocompatibilite : chercher sous flag_key, puis sous checkbox_key
+                entry = (val.get(flag_key) or val.get(checkbox_key) or {}) if isinstance(val, dict) else {}
+                ok = entry.get("ok", False) if isinstance(entry, dict) else False
+                cb.blockSignals(True)
+                cb.setChecked(bool(ok))
+                cb.blockSignals(False)
+                # Texte dynamique : probleme ou OK
+                prob_key, ok_key = self._CHECK_LABELS.get(checkbox_key, (None, None))
+                if prob_key and ok_key:
+                    cb.setText(_(ok_key) if ok else _(prob_key))
+                    cb.setStyleSheet(
+                        f"color: {ds.p.success if ok else ds.p.error}; "
+                        f"font-size: {ds.font_label_lg}px; spacing: {ds.space_xs}px; font-weight: bold;")
+                if ok and entry.get("by"):
+                    by_name = names.get(int(entry["by"]), "")
+                    who_lbl.setText(_("student_form.validated_by").format(name=by_name) if by_name
+                                   else _("student_form.validated"))
+                    who_lbl.setStyleSheet(f"color: {ds.p.success}; font-weight: bold;")
+                else:
+                    who_lbl.setText(_("student_form.not_validated"))
+                    who_lbl.setStyleSheet(f"color: {ds.p.text_disabled};")
+            self._update_photo_badge()
+        except Exception as e:
+            log(f"StudentEditDialog._refresh_val_banner: {e}")
+
+    def _update_photo_badge(self):
+        """Colorie la vignette photo selon le taux de completion (0→rouge, 4→vert, entre→orange)."""
+        if not hasattr(self, "_val_items") or not self._val_items:
+            return
+        checked_count = sum(1 for _, (cb, _) in self._val_items.items() if cb.isChecked())
+        if checked_count == 0:
+            photo_bg = ds.p.error_container if hasattr(ds.p, 'error_container') else "#fce4ec"
+            photo_border = ds.p.error
+        elif checked_count == 4:
+            photo_bg = ds.p.surface
+            photo_border = ds.p.success
+        else:
+            photo_bg = ds.p.secondary_container if hasattr(ds.p, 'secondary_container') else "#fff3e0"
+            photo_border = ds.p.tertiary
+        if hasattr(self, "_photo") and self._photo:
+            self._photo.setStyleSheet(
+                f"background: {photo_bg}; border-radius: {ds.radius_sm}px; "
+                f"border: 3px solid {photo_border};")
+
+    def _open_timeline_dialog(self):
+        """Bouton « Chronologie » du rail Dossiers -> ouvre une popup modale."""
+        self._dossier_panel.refresh_timeline()
+        dlg = M3Dialog(self)
+        dlg.setWindowTitle(_("dossier.timeline.title"))
+        dlg.setMinimumSize(ds.golden_width(600), 600)
+        dlg.setStyleSheet(f"background: {ds.p.surface};")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(self._timeline_page)
+        buttons = M3DialogButtonBox(M3DialogButtonBox.Close)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.exec()
 
     # ── Indicateur « dossier modifié » ──
 
-    @safe_slot("Unknown._mark_dirty")
     def _mark_dirty(self):
         """Une entrée du dossier a été ajoutée/modifiée/supprimée → dossier modifié.
 
@@ -1368,11 +1439,9 @@ class StudentEditDialog(ThemedDialog):
         raw_notes_json = d.get("notes_json") or None
         if raw_notes_json:
             if isinstance(raw_notes_json, str):
-                import json
-
                 try:
-                    raw_notes_json = json.loads(raw_notes_json)
-                except json.JSONDecodeError:
+                    raw_notes_json = _json.loads(raw_notes_json)
+                except _json.JSONDecodeError:
                     raw_notes_json = None
         if raw_notes_json and isinstance(raw_notes_json, dict):
             self._dossier_panel.set_data(raw_notes_json)
@@ -1380,8 +1449,6 @@ class StudentEditDialog(ThemedDialog):
             # Fallback : importer les anciennes notes TEXT dans la section Autre
             old_notes = d.get("notes", "") or ""
             if old_notes:
-                import json
-
                 old_data = {
                     "autre": {
                         "intro": "<p>Notes importées de l'ancien système.</p>",
@@ -1411,6 +1478,10 @@ class StudentEditDialog(ThemedDialog):
             conf = raw_notes_json.get("confidentiel", {}) if isinstance(raw_notes_json, dict) else {}
             self._conf_panel.load_entries(conf.get("entries", []))
 
+        # Charger les flags de validation dans le bandeau
+        if hasattr(self, "_val_items") and self._val_items:
+            self._refresh_val_banner()
+
         self._load_parents()
         self._load_events()
 
@@ -1426,8 +1497,6 @@ class StudentEditDialog(ThemedDialog):
             px_large = px_large.scaled(240, 240, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._photo_large.setPixmap(px_large)
 
-        # Charger les notes/résultats
-        self._load_grades()
 
     def _load_parents(self):
         self._parent_ids = []
@@ -1443,7 +1512,7 @@ class StudentEditDialog(ThemedDialog):
                        COALESCE(sp.nature, par.nature, 'parent'),
                        aec.email,
                        COALESCE(aec.tel_smartphone_1, aec.tel_maison, '')
-                FROM student_parent sp
+                FROM larcauth_student_parent sp
                 JOIN larcauth_aecuser aec ON aec.id = sp.parent_id
                 LEFT JOIN larcauth_parent par ON par.aecuser_ptr_id = aec.id
                 WHERE sp.student_id = %s
@@ -1562,7 +1631,7 @@ class StudentEditDialog(ThemedDialog):
             notes_data["health"] = self._dossier_panel.get_health()
             if hasattr(self, "_conf_panel"):
                 notes_data["confidentiel"] = {"intro": "", "entries": self._conf_panel.get_entries()}
-            notes_json = json.dumps(notes_data)
+            notes_json = _json.dumps(notes_data)
             cur.execute(
                 "UPDATE larcauth_student SET notes_json = %s WHERE aecuser_ptr_id = %s",
                 (notes_json, self._sid),
@@ -1692,45 +1761,6 @@ class StudentEditDialog(ThemedDialog):
 
     # ──── Charger les notes/résultats ────
 
-    def _load_grades(self):
-        """Charge les notes/résultats depuis la DB."""
-        conn = db.server_conn
-        if not conn:
-            return
-        try:
-            cur = conn.cursor()
-            try:
-                cur.execute(
-                    """
-                    SELECT
-                        sub.label AS subject,
-                        eg.grade,
-                        eg.date_grade,
-                        eg.comment
-                    FROM evaluation_grade eg
-                    JOIN evaluation_subject sub ON sub.id = eg.fk_subject_id
-                    WHERE eg.fk_student_id = %s
-                    ORDER BY eg.date_grade DESC, sub.label
-                    LIMIT 100
-                """,
-                    (self._sid,),
-                )
-                rows = cur.fetchall()
-            except Exception:
-                rows = []
-            self._grades_table.setRowCount(len(rows))
-            for i, (subject, grade, date_grade, comment) in enumerate(rows):
-                self._grades_table.setItem(i, 0, QTableWidgetItem(subject or ""))
-                self._grades_table.setItem(i, 1, QTableWidgetItem(str(grade) if grade else ""))
-                self._grades_table.setItem(i, 2, QTableWidgetItem(str(date_grade)[:10] if date_grade else ""))
-                self._grades_table.setItem(i, 3, QTableWidgetItem(comment or ""))
-            if not rows:
-                self._grades_table.setRowCount(1)
-                self._grades_table.setItem(0, 0, QTableWidgetItem(_("student_form.no_grades")))
-            self._grades_table.resizeColumnsToContents()
-        except Exception as e:
-            log(f"StudentEditDialog._load_grades: {e}")
-
     # ──── Accès répertoires drive (relevés / bulletins) ────
 
     @safe_slot("StudentEditDialog.open_drive_dir")
@@ -1763,24 +1793,34 @@ class StudentEditDialog(ThemedDialog):
     def _add_parent_link(self):
         dlg = M3Dialog(self)
         dlg.setWindowTitle(_("student_form.add_parent"))
-        dlg.setMinimumSize(ds.golden_height(610), ds.golden_height(610))
+        dlg.setMinimumSize(700, 500)
         dlg.setStyleSheet(f"background: {ds.p.surface}; color: {ds.p.text_strong};")
         layout = QVBoxLayout(dlg)
+        layout.setSpacing(ds.space_sm)
+        layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+
+        layout.addWidget(M3Label(_("student_form.search_parent_label"), style="title_small"))
+
         search_inp = M3TextField()
         search_inp.setPlaceholderText(_("student_form.search_parent_placeholder"))
         search_inp.setStyleSheet(ds.flat_input_qss())
+        search_inp.setMinimumHeight(ds.field_height)
         layout.addWidget(search_inp)
-        result_list = M3ListWidget()
-        result_list.setStyleSheet(ds.table_qss())
-        layout.addWidget(result_list, 1)
-        buttons = M3DialogButtonBox(M3DialogButtonBox.Ok | M3DialogButtonBox.Cancel)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
+
+        # Combo au lieu de ListWidget — plus simple a selectionner
+        parent_combo = M3ComboBox()
+        parent_combo.setMinimumHeight(ds.field_height)
+        parent_combo.setStyleSheet(
+            f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; "
+            f"padding: {ds.space_xs}px; min-width: 300px;")
+        layout.addWidget(parent_combo)
+
+        self._search_parents_data = []
 
         def on_search(text):
-            if len(text.strip()) < 3:
-                result_list.clear()
+            if len(text.strip()) < 2:
+                parent_combo.clear()
+                self._search_parents_data.clear()
                 return
             conn = db.server_conn
             if not conn:
@@ -1790,47 +1830,52 @@ class StudentEditDialog(ThemedDialog):
                 q = "%" + text.strip() + "%"
                 cur.execute(
                     """
-                    SELECT id, last_name, first_name, email
-                    FROM larcauth_aecuser
-                    WHERE type_parentutor = TRUE
-                      AND (LOWER(last_name) LIKE LOWER(%s)
-                           OR LOWER(first_name) LIKE LOWER(%s)
-                           OR LOWER(email) LIKE LOWER(%s))
-                      AND id NOT IN (
-                           SELECT parent_id FROM student_parent WHERE student_id = %s)
-                    ORDER BY last_name, first_name
+                    SELECT aec.id, aec.last_name, aec.first_name, aec.email
+                    FROM larcauth_aecuser aec
+                    JOIN larcauth_parent par ON par.aecuser_ptr_id = aec.id
+                    WHERE aec.is_active = TRUE
+                      AND par.enabled = TRUE
+                      AND (LOWER(aec.last_name) LIKE LOWER(%s)
+                           OR LOWER(aec.first_name) LIKE LOWER(%s)
+                           OR LOWER(aec.email) LIKE LOWER(%s))
+                      AND aec.id NOT IN (
+                           SELECT parent_id FROM larcauth_student_parent WHERE student_id = %s)
+                    ORDER BY aec.last_name, aec.first_name
                     LIMIT 50
                 """,
                     (q, q, q, self._sid),
                 )
-                result_list.clear()
-                self._search_parents_data = []
+                parent_combo.clear()
+                self._search_parents_data.clear()
                 for pid, ln, fn, em in cur.fetchall():
                     disp = f"{ln or ''} {fn or ''} ({em or 'pas d e-mail'})"
-                    result_list.addItem(disp)
+                    parent_combo.addItem(disp, pid)
                     self._search_parents_data.append(pid)
             except Exception as e:
                 log(f"_add_parent_link search: {e}")
 
         search_inp.textChanged.connect(on_search)
-        self._search_parents_data = []
+
+        buttons = M3DialogButtonBox(M3DialogButtonBox.Ok | M3DialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
 
         if dlg.exec() == M3Dialog.Accepted:
-            cur_sel = result_list.currentRow()
-            if cur_sel < 0 or cur_sel >= len(self._search_parents_data):
+            pid = parent_combo.currentData()
+            if not pid:
+                QMessageBox.warning(self, _("student_form.add_parent"),
+                                    _("parent.error.no_parent_selected"))
                 return
-            pid = self._search_parents_data[cur_sel]
             conn = db.server_conn
             if not conn:
                 return
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    """
-                    INSERT INTO student_parent (student_id, parent_id) VALUES (%s, %s)
-                    ON CONFLICT DO NOTHING""",
-                    (self._sid, pid),
-                )
+                    "INSERT INTO larcauth_student_parent (student_id, parent_id) "
+                    "VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    (self._sid, pid))
                 log(f"Linked parent #{pid} to student #{self._sid}")
             except Exception as e:
                 log(f"_add_parent_link insert: {e}")
@@ -1856,7 +1901,7 @@ class StudentEditDialog(ThemedDialog):
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE student_parent SET nature = %s WHERE student_id = %s AND parent_id = %s",
+                "UPDATE larcauth_student_parent SET nature = %s WHERE student_id = %s AND parent_id = %s",
                 (nature.strip(), self._sid, pid),
             )
             log(f"Updated nature for parent #{pid} of student #{self._sid}: {nature.strip()}")
@@ -1888,7 +1933,7 @@ class StudentEditDialog(ThemedDialog):
             return
         try:
             cur = conn.cursor()
-            cur.execute("DELETE FROM student_parent WHERE student_id = %s AND parent_id = %s", (self._sid, pid))
+            cur.execute("DELETE FROM larcauth_student_parent WHERE student_id = %s AND parent_id = %s", (self._sid, pid))
             log(f"Removed parent #{pid} from student #{self._sid}")
             self._load_parents()
         except Exception as e:
@@ -2196,17 +2241,15 @@ class StudentCreateDialog(ThemedDialog):
         self._inp_date_joined = M3DateEdit()
         self._inp_date_joined.setDisplayFormat("yyyy-MM-dd")
         self._inp_date_joined.setCalendarPopup(True)
-        self._inp_date_joined.setSpecialValueText(" ")
-        self._inp_date_joined.setDate(QDate())
+        self._inp_date_joined.setDate(QDate.currentDate())
         self._inp_date_joined.setStyleSheet(
-            f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_md}px; color: {ds.p.text_strong};"
+            f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_xs}px {ds.space_sm}px; color: {ds.p.text_strong};"
         )
         self._inp_date = M3DateEdit()
         self._inp_date.setDisplayFormat("yyyy-MM-dd")
         self._inp_date.setCalendarPopup(True)
-        self._inp_date.setSpecialValueText(" ")
-        self._inp_date.setDate(QDate())
-        self._inp_date.setStyleSheet(f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_md}px; color: {ds.p.text_strong};")
+        self._inp_date.setDate(QDate.currentDate())
+        self._inp_date.setStyleSheet(f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_xs}px {ds.space_sm}px; color: {ds.p.text_strong};")
         self._inp_genre = M3ComboBox()
         self._inp_genre.setStyleSheet(
             f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_md}px; min-width: {ds.window_width * 3 // 20}px;"
@@ -2215,10 +2258,9 @@ class StudentCreateDialog(ThemedDialog):
         self._inp_birthdate = M3DateEdit()
         self._inp_birthdate.setDisplayFormat("yyyy-MM-dd")
         self._inp_birthdate.setCalendarPopup(True)
-        self._inp_birthdate.setSpecialValueText(" ")
-        self._inp_birthdate.setDate(QDate())
+        self._inp_birthdate.setDate(QDate.currentDate())
         self._inp_birthdate.setStyleSheet(
-            f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_md}px; color: {ds.p.text_strong};"
+            f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; padding: {ds.space_xs}px {ds.space_sm}px; color: {ds.p.text_strong};"
         )
         self._inp_addr1 = M3TextEdit()
         self._inp_addr1.setStyleSheet(ds.flat_input_qss())
@@ -2236,122 +2278,142 @@ class StudentCreateDialog(ThemedDialog):
         self._inp_pays = M3TextField(_("student_form.default_country"))
         self._inp_pays.setStyleSheet(ds.flat_input_qss())
 
-        # Sidebar verticale + QStackedWidget (même pattern que StudentEditDialog)
-        nav_row = QHBoxLayout()
-        nav_row.setSpacing(ds.sp(SpacingToken.SM))
-        nav_side = QVBoxLayout()
-        nav_side.setSpacing(ds.space_sm)
-        nav_side.setContentsMargins(0, 0, ds.sp(SpacingToken.SM), 0)
+        # ═══════════════════════════════════════════════════════════
+        #   Helpers de construction (identiques au dialogue édition)
+        # ═══════════════════════════════════════════════════════════
 
-        self._nav_btns: list[M3Button] = []
+        def _section_card(title: str, icon_name: str):
+            card = M3Card(variant=CardVariant.ELEVATED)
+            card.setStyleSheet(
+                f"M3Card {{ background: {ds.p.surface}; "
+                f"border: 1px solid {ds.p.outline_variant}; "
+                f"border-radius: {ds.radius_md}px; }}")
+            cl = card.content_layout()
+            cl.setSpacing(ds.space_sm)
+            cl.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+            hdr = QHBoxLayout()
+            hdr.setSpacing(ds.space_xs)
+            icon_lbl = QLabel()
+            icon_lbl.setPixmap(md3_icon(icon_name, color=ds.p.primary, size=20).pixmap(20, 20))
+            hdr.addWidget(icon_lbl)
+            title_lbl = M3Label(title, style="title_medium")
+            title_lbl.setStyleSheet(f"color: {ds.p.text_strong}; font-weight: bold;")
+            hdr.addWidget(title_lbl)
+            hdr.addStretch()
+            cl.addLayout(hdr)
+            sep = M3Frame()
+            sep.setFixedHeight(1)
+            sep.setStyleSheet(f"background: {ds.p.outline_variant};")
+            cl.addWidget(sep)
+            return card, cl
 
-        # --- Page 1 : Identité & Contact ---
-        p1 = M3Frame()
-        p1_layout = QVBoxLayout(p1)
-        p1_layout.setSpacing(ds.sp(SpacingToken.MD))
+        def _field_row(label: str, widget):
+            row = QVBoxLayout()
+            row.setSpacing(ds.space_xxs)
+            lbl = M3Label(label, style="label_small")
+            lbl.setStyleSheet(f"color: {ds.p.text_soft}; font-weight: bold;")
+            row.addWidget(lbl)
+            widget.setMinimumHeight(ds.field_height)
+            widget.setStyleSheet(ds.flat_input_qss())
+            row.addWidget(widget)
+            return row
 
-        # Carte Identité
-        id_card = M3Card(variant=CardVariant.ELEVATED)
-        id_cl = id_card.content_layout()
-        id_cl.setSpacing(ds.sp(SpacingToken.SM))
-        id_cl.addWidget(M3Label(_("student_form.tab_identity"), style="title_small"))
+        # ═══════════════════════════════════════════════════════════
+        #   ScrollArea : sections en single-page
+        # ═══════════════════════════════════════════════════════════
+
+        scroll = M3ScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            f"M3ScrollArea {{ background: {ds.p.background}; border: none; }}")
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet(f"background: {ds.p.background};")
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(ds.space_md)
+        scroll_layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+
+        self._section_cards: list[M3Card] = []
+
+        # ── 0. Classe (grille de sélection + info slot) ──
+        if self._preselected_class:
+            class_card, class_cl = _section_card(_("student_form.class_selector") or "Classe", "school")
+            class_cl.addWidget(self._class_info)
+            self._slot_info = M3Label(_("student_form.select_class"), style="body_medium")
+            self._slot_info.setStyleSheet(f"padding: {ds.space_xs}px; font-style: italic;")
+            class_cl.addWidget(self._slot_info)
+            scroll_layout.addWidget(class_card)
+            self._section_cards.append(class_card)
+        else:
+            class_card, class_cl = _section_card(_("student_form.class_selector") or "Classe", "school")
+            if self._class_grid:
+                class_cl.addWidget(self._class_grid)
+            self._slot_info = M3Label(_("student_form.select_class"), style="body_medium")
+            self._slot_info.setStyleSheet(f"padding: {ds.space_xs}px; font-style: italic;")
+            class_cl.addWidget(self._slot_info)
+            scroll_layout.addWidget(class_card)
+            self._section_cards.append(class_card)
+
+        # ── 1. Identité ──
+        id_card, id_cl = _section_card(_("student_form.tab_identity"), "person")
         id_grid = QGridLayout()
-        id_grid.setSpacing(ds.sp(SpacingToken.SM))
-        id_grid.setColumnStretch(0, 1)
-        id_grid.setColumnStretch(1, 1)
-        r = 0
-        id_grid.addWidget(_lbl(_("student_form.first_name_label")), r, 0)
-        id_grid.addWidget(_lbl(_("student_form.last_name_label")), r, 1)
-        r += 1
-        id_grid.addWidget(self._inp_prenom, r, 0)
-        id_grid.addWidget(self._inp_nom, r, 1)
-        r += 1
-        id_grid.addWidget(_lbl(_("student_form.gender_label")), r, 0)
-        r += 1
-        id_grid.addWidget(self._inp_genre, r, 0)
-        self._inp_genre.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.XL))
+        id_grid.setSpacing(ds.space_md)
+        id_grid.setColumnStretch(0, 1); id_grid.setColumnStretch(1, 1); id_grid.setColumnStretch(2, 1)
+        id_grid.addLayout(_field_row(_("student_form.first_name_label"), self._inp_prenom), 0, 0)
+        id_grid.addLayout(_field_row(_("student_form.last_name_label"), self._inp_nom), 0, 1)
+        id_grid.addLayout(_field_row(_("student_form.gender_label"), self._inp_genre), 0, 2)
+        id_grid.addLayout(_field_row(_("student_form.arrival_label"), self._inp_date_joined, is_date=True), 1, 0)
+        id_grid.addLayout(_field_row(_("student_form.entry_date"), self._inp_date, is_date=True), 1, 1)
+        id_grid.addLayout(_field_row(_("student_form.birth_date"), self._inp_birthdate, is_date=True), 1, 2)
         id_cl.addLayout(id_grid)
-        p1_layout.addWidget(id_card)
+        scroll_layout.addWidget(id_card)
+        self._section_cards.append(id_card)
 
-        # Carte Dates
-        dt_card = M3Card(variant=CardVariant.ELEVATED)
-        dt_cl = dt_card.content_layout()
-        dt_cl.setSpacing(ds.sp(SpacingToken.SM))
-        dt_cl.addWidget(M3Label("Dates", style="title_small"))
-        dt_grid = QGridLayout()
-        dt_grid.setSpacing(ds.sp(SpacingToken.SM))
-        for i in range(6):
-            dt_grid.setColumnStretch(i, 1)
-        for row, (lbl, widget) in enumerate(
-            [
-                (_("student_form.arrival_label"), self._inp_date_joined),
-                (_("student_form.entry_date"), self._inp_date),
-                (_("student_form.birth_date"), self._inp_birthdate),
-            ]
-        ):
-            dt_grid.addWidget(M3Label(lbl, style="body_medium"), row * 2, 0, 1, 3)
-            dt_grid.addWidget(widget, row * 2 + 1, 0, 1, 3)
-        dt_cl.addLayout(dt_grid)
-        p1_layout.addWidget(dt_card)
-
-        # Carte Contact
-        ct_card = M3Card(variant=CardVariant.ELEVATED)
-        ct_cl = ct_card.content_layout()
-        ct_cl.setSpacing(ds.sp(SpacingToken.SM))
-        ct_cl.addWidget(M3Label("Contact", style="title_small"))
+        # ── 2. Contact ──
+        ct_card, ct_cl = _section_card("Contact", "description")
         ct_grid = QGridLayout()
-        ct_grid.setSpacing(ds.sp(SpacingToken.SM))
-        ct_grid.setColumnStretch(0, 1)
-        ct_grid.setColumnStretch(1, 1)
-        r = 0
-        ct_grid.addWidget(_lbl(_("student_form.email_label")), r, 0)
-        ct_grid.addWidget(_lbl(_("student_form.email_personal")), r, 1)
-        r += 1
-        ct_grid.addWidget(self._inp_email, r, 0)
-        ct_grid.addWidget(self._inp_emailperso, r, 1)
-        r += 1
-        ct_grid.addWidget(_lbl(_("student_form.phone_mobile")), r, 0)
-        ct_grid.addWidget(_lbl(_("student_form.phone_fixed")), r, 1)
-        r += 1
-        ct_grid.addWidget(self._inp_tel, r, 0)
-        ct_grid.addWidget(self._inp_tel2, r, 1)
+        ct_grid.setSpacing(ds.space_md)
+        ct_grid.setColumnStretch(0, 1); ct_grid.setColumnStretch(1, 1)
+        ct_grid.addLayout(_field_row(_("student_form.email_label"), self._inp_email), 0, 0)
+        ct_grid.addLayout(_field_row(_("student_form.email_personal"), self._inp_emailperso), 0, 1)
+        ct_grid.addLayout(_field_row(_("student_form.phone_mobile"), self._inp_tel), 1, 0)
+        ct_grid.addLayout(_field_row(_("student_form.phone_fixed"), self._inp_tel2), 1, 1)
         ct_cl.addLayout(ct_grid)
-        p1_layout.addWidget(ct_card)
-        p1_layout.addStretch()
+        scroll_layout.addWidget(ct_card)
+        self._section_cards.append(ct_card)
 
-        # --- Page 2 : Adresse & Parents ---
-        p2_page = M3Frame()
-        p2_page_layout = QVBoxLayout(p2_page)
-        p2_page_layout.setSpacing(ds.sp(SpacingToken.MD))
+        # ── 3. Adresse ──
+        ad_card, ad_cl = _section_card(_("student_form.address_title"), "home")
+        ad_grid = QGridLayout()
+        ad_grid.setSpacing(ds.space_md)
+        ad_grid.setColumnStretch(0, 1); ad_grid.setColumnStretch(1, 1); ad_grid.setColumnStretch(2, 1)
+        ad_grid.addLayout(_field_row(_("student_form.street_placeholder"), self._inp_addr1), 0, 0, 1, 3)
+        ad_grid.addLayout(_field_row(_("student_form.address_complement"), self._inp_addr2), 1, 0, 1, 3)
+        ad_grid.addLayout(_field_row(_("student_form.zip_label"), self._inp_cp), 2, 0)
+        ad_grid.addLayout(_field_row(_("student_form.city_label"), self._inp_ville), 2, 1)
+        ad_grid.addLayout(_field_row(_("student_form.country_label"), self._inp_pays), 2, 2)
+        ad_cl.addLayout(ad_grid)
+        scroll_layout.addWidget(ad_card)
+        self._section_cards.append(ad_card)
 
-        # Carte Parents
-        par_card = M3Card(variant=CardVariant.ELEVATED)
-        par_cl = par_card.content_layout()
-        par_cl.setSpacing(ds.sp(SpacingToken.SM))
-        par_cl.addWidget(M3Label(_("student_form.parents_title"), style="title_small"))
-
+        # ── 4. Parents ──
+        par_card, par_cl = _section_card(_("student_form.parents_title"), "person")
         self._parents_table = M3TableWidget()
-        self._parents_table.set_headers(
-            [
-                _("student_form.parents_table_nom"),
-                _("student_form.parents_table_nature"),
-                _("student_form.parents_table_email"),
-                _("student_form.parents_table_phone"),
-            ]
-        )
+        self._parents_table.set_headers([
+            _("student_form.parents_table_nom"), _("student_form.parents_table_nature"),
+            _("student_form.parents_table_email"), _("student_form.parents_table_phone"),
+        ])
         self._parents_table.horizontalHeader().setStretchLastSection(True)
         self._parents_table.setEditTriggers(M3TableWidget.NoEditTriggers)
         self._parents_table.setSelectionBehavior(M3TableWidget.SelectRows)
         self._parents_table.setShowGrid(True)
-        hh = self._parents_table.horizontalHeader()
-        hh.setFixedHeight(ds.field_height)
+        self._parents_table.horizontalHeader().setFixedHeight(ds.field_height)
         self._parents_table.setStyleSheet(ds.table_qss())
         self._parents_table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
         self._parents_table.setMaximumHeight(ds.sp(SpacingToken.XXXL))
         par_cl.addWidget(self._parents_table)
 
         parent_tools = QHBoxLayout()
-        parent_tools.setSpacing(ds.sp(SpacingToken.SM))
+        parent_tools.setSpacing(ds.space_sm)
         add_par_btn = M3Button(_("student_form.add_parent"), variant=ButtonVariant.FILLED)
         add_par_btn.clicked.connect(self._add_parent_link)
         parent_tools.addWidget(add_par_btn)
@@ -2366,174 +2428,100 @@ class StudentCreateDialog(ThemedDialog):
         parent_tools.addWidget(copy_btn)
         parent_tools.addStretch()
         par_cl.addLayout(parent_tools)
-        # Q2 — état vide INLINE (jamais de QMessageBox modal pour zéro résultat)
         self._addr_status = M3Label("", style="body_small")
         self._addr_status.setWordWrap(True)
         self._addr_status.setStyleSheet(f"color: {ds.p.text_disabled};")
         self._addr_status.hide()
         par_cl.addWidget(self._addr_status)
-        p2_page_layout.addWidget(par_card)
+        scroll_layout.addWidget(par_card)
+        self._section_cards.append(par_card)
 
-        # Carte Adresse
-        addr_card = M3Card(variant=CardVariant.ELEVATED)
-        addr_cl = addr_card.content_layout()
-        addr_cl.setSpacing(ds.sp(SpacingToken.SM))
-        addr_cl.addWidget(M3Label(_("student_form.address_title"), style="title_small"))
-
-        addr_cl.addWidget(self._inp_addr1)
-        addr_cl.addWidget(self._inp_addr2)
-        addr_grid = QGridLayout()
-        addr_grid.setSpacing(ds.sp(SpacingToken.SM))
-        addr_grid.setColumnStretch(0, 1)
-        addr_grid.setColumnStretch(1, 1)
-        addr_grid.addWidget(_lbl(_("student_form.zip_label")), 0, 0)
-        addr_grid.addWidget(_lbl(_("student_form.city_label")), 0, 1)
-        addr_grid.addWidget(self._inp_cp, 1, 0)
-        addr_grid.addWidget(self._inp_ville, 1, 1)
-        addr_grid.addWidget(_lbl(_("student_form.country_label")), 2, 0)
-        addr_grid.addWidget(self._inp_pays, 3, 0, 1, 2)
-        addr_cl.addLayout(addr_grid)
-        p2_page_layout.addWidget(addr_card)
-        p2_page_layout.addStretch()
-
-        # --- Page 3 : Événements (placeholder — l'élève n'existe pas encore) ---
-        p3 = M3Frame()
-        p3_layout = QVBoxLayout(p3)
-        p3_layout.setSpacing(ds.sp(SpacingToken.SM))
-        ph3 = M3Label(_("student_form.events_placeholder"), style="body_medium")
-        ph3.setAlignment(Qt.AlignCenter)
-        ph3.setWordWrap(True)
-        p3_layout.addWidget(ph3)
-        p3_layout.addStretch()
-
-        # --- Page 4 : Dossiers (sections + fichiers) ---
-        p4 = M3Frame()
-        p4_layout = QVBoxLayout(p4)
-        p4_layout.setContentsMargins(0, 0, 0, 0)
+        # ── 5. Dossiers (placeholder — l'élève n'existe pas encore) ──
+        dos_card, dos_cl = _section_card(_("student_form.tab_documents"), "subject")
         from LarcSecretaire.views.dossier_panel import DossierPanel
-
         self._dossier_panel = DossierPanel(0)
-        p4_layout.addWidget(self._dossier_panel, 1)
+        self._dossier_panel.setMinimumHeight(300)
+        self._dossier_panel.setMaximumHeight(450)
+        dos_cl.addWidget(self._dossier_panel)
+        scroll_layout.addWidget(dos_card)
+        self._section_cards.append(dos_card)
         self._timeline_page = self._dossier_panel.timeline
 
-        # --- Page 7 : Notes / Résultats (répertoires drive) ---
-        p7 = M3Frame()
-        p7_layout = QVBoxLayout(p7)
-        p7_layout.setSpacing(ds.sp(SpacingToken.SM))
-        p7_layout.addWidget(M3Label(_("student_form.grades_title"), style="title_small"))
+        # ── 6. Événements (placeholder — l'élève n'existe pas encore) ──
+        evt_card, evt_cl = _section_card(_("student_form.events_title"), "event")
+        ph_evt = M3Label(_("student_form.events_placeholder"), style="body_medium")
+        ph_evt.setAlignment(Qt.AlignCenter)
+        ph_evt.setWordWrap(True)
+        evt_cl.addWidget(ph_evt)
+        scroll_layout.addWidget(evt_card)
+        self._section_cards.append(evt_card)
 
-        from LarcSecretaire.common.app_config import app_config as _acfg
-
-        drive_row = QHBoxLayout()
-        drive_row.setSpacing(ds.space_sm)
-        for dkey, dtitle_key in [("releves", "student_form.drive_releves"), ("bulletins", "student_form.drive_bulletins")]:
-            dcard = M3Card(variant=CardVariant.ELEVATED)
-            dcl = dcard.content_layout()
-            dcl.setSpacing(ds.space_sm)
-            dcl.addWidget(M3Label(_(dtitle_key), style="title_small"))
-            ddir = _acfg.get(f"{dkey}_dir", "")
-            durl = _acfg.get(f"{dkey}_cloud_url", "")
-            dir_lbl = M3Label(str(ddir), style="label_small")
-            dir_lbl.setWordWrap(True)
-            dcl.addWidget(dir_lbl)
-            btns = QHBoxLayout()
-            btns.setSpacing(ds.space_xs)
-            b_intra = M3Button(_("student_form.drive_intranet"), variant=ButtonVariant.TONAL)
-            b_intra.clicked.connect(lambda _=False, p=ddir: self._open_drive_dir(p))
-            btns.addWidget(b_intra)
-            b_cloud = M3Button(_("student_form.drive_cloud"), variant=ButtonVariant.FILLED)
-            b_cloud.clicked.connect(lambda _=False, u=durl: self._open_drive_cloud(u))
-            btns.addWidget(b_cloud)
-            btns.addStretch()
-            dcl.addLayout(btns)
-            drive_row.addWidget(dcard, 1)
-        p7_layout.addLayout(drive_row)
-        p7_layout.addStretch()
-
-        # --- Page 8 : Photos ---
-        p8 = M3Frame()
-        p8_layout = QVBoxLayout(p8)
-        p8_layout.setSpacing(ds.sp(SpacingToken.MD))
-        p8_layout.setAlignment(Qt.AlignCenter)
-
+        # ── 7. Photos ──
+        photo_card, photo_cl = _section_card(_("student_form.tab_photos"), "add")
+        photo_box = QVBoxLayout()
+        photo_box.setAlignment(Qt.AlignCenter)
+        photo_box.setSpacing(ds.space_sm)
         self._photo_large = QLabel()
         self._photo_large.setFixedSize(ds.sp(SpacingToken.XXXL) * 2, ds.sp(SpacingToken.XXXL) * 2)
         self._photo_large.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
         self._photo_large.setAlignment(Qt.AlignCenter)
-        p8_layout.addWidget(self._photo_large, 0, Qt.AlignCenter)
-
-        photo_btn_row = QHBoxLayout()
-        photo_btn_row.setAlignment(Qt.AlignCenter)
+        photo_box.addWidget(self._photo_large, 0, Qt.AlignCenter)
         self._upload_photo_btn = M3Button(_("student_form.change_photo"), variant=ButtonVariant.FILLED)
         self._upload_photo_btn.clicked.connect(self._on_change_photo)
-        photo_btn_row.addWidget(self._upload_photo_btn)
-        p8_layout.addLayout(photo_btn_row)
-        p8_layout.addStretch()
+        photo_box.addWidget(self._upload_photo_btn, 0, Qt.AlignCenter)
+        photo_cl.addLayout(photo_box)
+        scroll_layout.addWidget(photo_card)
+        self._section_cards.append(photo_card)
 
-        # --- Page 5 : Confidentiel (restreint) ---
-        p5 = M3Frame()
-        p5_layout = QVBoxLayout(p5)
-        p5_layout.setSpacing(ds.sp(SpacingToken.SM))
+        # ── 8. Bulletins & Relevés ──
+        bul_card, bul_cl = _section_card(_("student_form.tab_bulletins"), "school")
+        from LarcSecretaire.common.app_config import app_config as _acfg
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(ds.space_md)
+        b_intra = M3Button(_("student_form.drive_intranet"), variant=ButtonVariant.FILLED)
+        b_intra.clicked.connect(lambda: (
+            self._open_drive_dir(_acfg.get("releves_dir", "")),
+            self._open_drive_dir(_acfg.get("bulletins_dir", ""))
+        ))
+        btn_row.addWidget(b_intra)
+        b_cloud = M3Button(_("student_form.drive_cloud"), variant=ButtonVariant.TONAL)
+        b_cloud.clicked.connect(lambda: (
+            self._open_drive_cloud(_acfg.get("releves_cloud_url", "")),
+            self._open_drive_cloud(_acfg.get("bulletins_cloud_url", ""))
+        ))
+        btn_row.addWidget(b_cloud)
+        btn_row.addStretch()
+        bul_cl.addLayout(btn_row)
+        scroll_layout.addWidget(bul_card)
+        self._section_cards.append(bul_card)
+
+        # ── 9. Confidentiel (restreint) ──
         from LarcSecretaire.common.session import UserRole
         from LarcSecretaire.common.session import session as _ses
-
+        conf_card, conf_cl = _section_card(_("student_form.tab_confidential"), "lock")
         if _ses.role in (UserRole.ADMIN, UserRole.COORD, UserRole.SECR):
-            conf_label = M3Label(_("student_form.confidential_notes"), style="headline_large")
-            p5_layout.addWidget(conf_label)
             conf_info = M3Label(_("student_form.confidential_desc"), style="body_medium")
-            conf_info.setStyleSheet(f"padding-bottom: {ds.sp(SpacingToken.SM)}px;")
             conf_info.setWordWrap(True)
-            p5_layout.addWidget(conf_info)
+            conf_cl.addWidget(conf_info)
             from LarcSecretaire.views.dossier_panel import ConfidentialPanel
-
             self._conf_panel = ConfidentialPanel(0)
-            p5_layout.addWidget(self._conf_panel, 1)
+            self._conf_panel.setMaximumHeight(350)
+            conf_cl.addWidget(self._conf_panel)
         else:
             deny = M3Label(_("student_form.confidential_restricted"), style="title_small")
-            deny.setStyleSheet(f"padding: {ds.space_xl}px;")
             deny.setAlignment(Qt.AlignCenter)
             deny.setWordWrap(True)
-            p5_layout.addWidget(deny)
+            conf_cl.addWidget(deny)
+        scroll_layout.addWidget(conf_card)
+        self._section_cards.append(conf_card)
 
-        # Construire la sidebar + stack (même ordre que StudentEditDialog)
-        self._nav_stack = M3StackedWidget()
-        nav_pages = [
-            (p1, "badge", _("student_form.tab_identity")),
-            (p2_page, "home", _("student_form.tab_address")),
-            (p3, "event", _("student_form.tab_events")),
-            (p4, "folder", _("student_form.tab_documents")),
-            (self._timeline_page, "timeline", _("dossier.timeline.title")),
-            (p5, "lock", _("student_form.tab_confidential")),
-            (p7, "school", _("student_form.tab_grades")),
-            (p8, "photo_camera", _("student_form.tab_photos")),
-        ]
-        icon_sz = theme_manager.image.icon_btn
-        self._dossier_nav_index = 0
-        self._timeline_nav_index = 0
-        for idx, (page, icon_name, label) in enumerate(nav_pages):
-            if page is p4:
-                self._dossier_nav_index = idx
-            if page is self._timeline_page:
-                self._timeline_nav_index = idx
-            btn = M3Button(label, variant=ButtonVariant.TONAL)
-            btn.setIcon(md3_icon(icon_name, color=theme_manager.palette.text_soft, size=icon_sz))
-            btn.setIconSize(QSize(icon_sz, icon_sz))
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setCheckable(True)
-            btn.setChecked(idx == 0)
-            btn.clicked.connect(lambda checked, i=idx: self._on_nav(i))
-            nav_side.addWidget(btn)
-            self._nav_btns.append(btn)
-            self._nav_stack.addWidget(page)
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        self._scroll = scroll
+        layout.addWidget(scroll, 1)
 
-        self._nav_stack.setCurrentIndex(0)
-        nav_side.addStretch()
-        nav_row.addLayout(nav_side)
-        nav_row.addWidget(self._nav_stack, 1)
-        layout.addLayout(nav_row, 1)
-
-        # ── Chronologie : bouton du rail Dossiers → onglet du dialogue ──
-        self._dossier_panel.timeline_requested.connect(self._open_timeline_tab)
+        # ── Chronologie : popup modale ──
+        self._dossier_panel.timeline_requested.connect(self._open_timeline_dialog)
 
         # Infos slot
         self._slot_info = M3Label(_("student_form.select_class"), style="body_medium")
@@ -2551,48 +2539,67 @@ class StudentCreateDialog(ThemedDialog):
 
         ds.theme_changed.connect(self._restyle)
 
-    @safe_slot("Unknown._restyle")
     def _restyle(self):
-        if hasattr(self, "_photo") and self._photo:
-            self._photo.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
-        if hasattr(self, "_photo_large") and self._photo_large:
-            self._photo_large.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
-        # Header élève : couleurs réactives au thème
+        # Scroll area
+        if hasattr(self, "_scroll") and self._scroll:
+            self._scroll.setStyleSheet(
+                f"M3ScrollArea {{ background: {ds.p.background}; border: none; }}")
+            if self._scroll.widget():
+                self._scroll.widget().setStyleSheet(f"background: {ds.p.background};")
+        # Cartes de section
+        section_style = (
+            f"M3Card {{ background: {ds.p.surface}; "
+            f"border: 1px solid {ds.p.outline_variant}; "
+            f"border-radius: {ds.radius_md}px; }}")
+        for card in getattr(self, "_section_cards", []):
+            card.setStyleSheet(section_style)
+        # Photos
+        for attr in ("_photo", "_photo_large"):
+            p = getattr(self, attr, None)
+            if p:
+                p.setStyleSheet(f"background: {ds.p.primary_container}; border-radius: {ds.radius_sm}px;")
+        # Header élève
         for lbl in (self._id_prenom, self._id_nom):
             lbl.setStyleSheet(f"font-weight: bold; color: {ds.p.text_strong};")
         for lbl in (self._id_classe, self._id_id):
             lbl.setStyleSheet(f"color: {ds.p.text_strong};")
+        # Tables
         if hasattr(self, "_parents_table") and self._parents_table:
             self._parents_table.setStyleSheet(ds.table_qss())
+        # Champs texte
         for w in self._inp_fields():
             w.setStyleSheet(ds.flat_input_qss())
+        # Champs date
         for w in self._date_fields():
             w.setStyleSheet(
                 f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; "
-                f"padding: {ds.space_md}px; color: {ds.p.text_strong}; background: {ds.p.surface}; "
-                f"QDateEdit QLineEdit {{ color: {ds.p.text_strong}; background: {ds.p.surface}; }}"
-            )
-            w.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.MD))
+                f"padding: {ds.space_xs}px {ds.space_md}px; color: {ds.p.text_strong}; "
+                f"background: {ds.p.surface}; "
+                f"QDateEdit QLineEdit {{ color: {ds.p.text_strong}; background: {ds.p.surface}; }}")
+            w.setMinimumWidth(ds.sp(SpacingToken.XXXL))
+        # Combo genre
         if hasattr(self, "_inp_genre") and self._inp_genre:
             self._inp_genre.setStyleSheet(
                 f"border: 1px solid {ds.p.outline}; border-radius: {ds.radius_xs}px; "
-                f"padding: {ds.space_md}px; min-width: {ds.window_width * 3 // 20}px; "
-                f"color: {ds.p.text_strong};"
-            )
+                f"padding: {ds.space_xxs}px {ds.space_xs}px; min-width: {ds.window_width * 3 // 20}px; "
+                f"color: {ds.p.text_strong};")
             self._inp_genre.setFixedWidth(ds.sp(SpacingToken.XXL) + ds.sp(SpacingToken.MD))
         if hasattr(self, "_addr_status") and self._addr_status:
             self._addr_status.setStyleSheet(f"color: {ds.p.text_disabled};")
 
-    def _on_nav(self, index: int):
-        self._nav_stack.setCurrentIndex(index)
-        for i, btn in enumerate(self._nav_btns):
-            btn.setChecked(i == index)
-        if index == getattr(self, "_timeline_nav_index", None):
-            self._dossier_panel.refresh_timeline()
-
-    @safe_slot("Unknown._open_timeline_tab")
-    def _open_timeline_tab(self):
-        self._on_nav(self._timeline_nav_index)
+    def _open_timeline_dialog(self):
+        """Bouton « Chronologie » du rail Dossiers -> ouvre une popup modale."""
+        self._dossier_panel.refresh_timeline()
+        dlg = M3Dialog(self)
+        dlg.setWindowTitle(_("dossier.timeline.title"))
+        dlg.setMinimumSize(ds.golden_width(600), 600)
+        dlg.setStyleSheet(f"background: {ds.p.surface};")
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(self._timeline_page)
+        buttons = M3DialogButtonBox(M3DialogButtonBox.Close)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.exec()
 
     @safe_slot("StudentCreateDialog.on_change_photo")
     def _on_change_photo(self):
@@ -2749,15 +2756,16 @@ class StudentCreateDialog(ThemedDialog):
                 col_hdr = M3Label(hdr_text, style="label_small")
                 col_hdr.setStyleSheet(f"background: {fg}; color: {on_fg}; border-radius: {ds.radius_sm}px; font-weight: bold; padding: {ds.space_xxs}px;")
                 col_hdr.setAlignment(Qt.AlignCenter)
-                col_hdr.setFixedHeight(ds.table_row_min)
+                col_hdr.setMinimumHeight(ds.field_height)
                 grd.addWidget(col_hdr, 0, col_idx)
 
                 for i, (cid, label) in enumerate(items):
                     btn = M3Button(label, variant=ButtonVariant.TONAL)
-                    btn.setFixedHeight(theme_manager.image.theme_btn)
+                    btn.setMinimumHeight(ds.field_height + ds.space_xs)
                     btn.setStyleSheet(
                         f"M3Button {{ background: {bg}; color: {fg}; border: 2px solid transparent; "
-                        f"border-radius: {ds.radius_sm}px; font-size: {ds.font_px_sm}px; padding: {ds.space_xxs // 2}px; }}"
+                        f"border-radius: {ds.radius_sm}px; font-size: {ds.font_label_lg}px; "
+                        f"padding: {ds.space_xs}px {ds.space_sm}px; }}"
                         f"M3Button:hover {{ background: {fg}; color: {bg}; }}"
                     )
                     btn.clicked.connect(lambda checked, c=cid: self._on_class_changed(c))
@@ -2816,13 +2824,15 @@ class StudentCreateDialog(ThemedDialog):
                 if cid == class_id:
                     btn.setStyleSheet(
                         f"M3Button {{ background: {fg}; color: {bg}; border: 2px solid {fg}; "
-                        f"border-radius: {ds.radius_sm}px; font-size: {ds.font_px_sm}px; padding: {ds.space_xxs // 2}px; }}"
+                        f"border-radius: {ds.radius_sm}px; font-size: {ds.font_label_lg}px; "
+                        f"padding: {ds.space_xs}px {ds.space_sm}px; }}"
                         f"M3Button:hover {{ background: {fg}; color: {bg}; }}"
                     )
                 else:
                     btn.setStyleSheet(
                         f"M3Button {{ background: {bg}; color: {fg}; border: 2px solid transparent; "
-                        f"border-radius: {ds.radius_sm}px; font-size: {ds.font_px_sm}px; padding: {ds.space_xxs // 2}px; }}"
+                        f"border-radius: {ds.radius_sm}px; font-size: {ds.font_label_lg}px; "
+                        f"padding: {ds.space_xs}px {ds.space_sm}px; }}"
                         f"M3Button:hover {{ background: {fg}; color: {bg}; }}"
                     )
 
@@ -2920,7 +2930,6 @@ class StudentCreateDialog(ThemedDialog):
         except Exception as e:
             log(f"StudentCreateDialog._load_genders: {e}")
 
-    @safe_slot("Unknown._on_create")
     def _on_create(self):
         nom = self._inp_nom.text().strip()
         prenom = self._inp_prenom.text().strip()
@@ -3000,7 +3009,7 @@ class StudentCreateDialog(ThemedDialog):
             notes_data["health"] = self._dossier_panel.get_health()
             if hasattr(self, "_conf_panel"):
                 notes_data["confidentiel"] = {"intro": "", "entries": self._conf_panel.get_entries()}
-            notes_json = json.dumps(notes_data)
+            notes_json = _json.dumps(notes_data)
             cur.execute(
                 """
                 UPDATE larcauth_student SET enabled = TRUE, updated_s = %s, notes_json = %s
@@ -3086,7 +3095,7 @@ class StudentCreateDialog(ThemedDialog):
             cur.execute(
                 """
                 SELECT aec.id, aec.last_name || ' ' || aec.first_name, sp.nature, aec.email, aec.tel_smartphone_1
-                FROM student_parent sp
+                FROM larcauth_student_parent sp
                 JOIN larcauth_aecuser aec ON aec.id = sp.parent_id
                 WHERE sp.student_id = %s
                 ORDER BY aec.last_name, aec.first_name
@@ -3159,24 +3168,30 @@ class StudentCreateDialog(ThemedDialog):
             return
         dlg = M3Dialog(self)
         dlg.setWindowTitle(_("student_form.add_parent"))
-        dlg.setMinimumSize(ds.golden_height(610), ds.golden_height(610))
+        dlg.setMinimumSize(700, 500)
         dlg.setStyleSheet(f"background: {ds.p.surface}; color: {ds.p.text_strong};")
         layout = QVBoxLayout(dlg)
+        layout.setSpacing(ds.space_sm)
+        layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+
+        layout.addWidget(M3Label(_("student_form.search_parent_label"), style="title_small"))
+
         search_inp = M3TextField()
         search_inp.setPlaceholderText(_("student_form.search_parent_placeholder"))
         search_inp.setStyleSheet(ds.flat_input_qss())
+        search_inp.setMinimumHeight(ds.field_height)
         layout.addWidget(search_inp)
-        result_list = M3ListWidget()
-        result_list.setStyleSheet(ds.table_qss())
-        layout.addWidget(result_list, 1)
-        buttons = M3DialogButtonBox(M3DialogButtonBox.Ok | M3DialogButtonBox.Cancel)
-        buttons.accepted.connect(dlg.accept)
-        buttons.rejected.connect(dlg.reject)
-        layout.addWidget(buttons)
+
+        parent_combo = M3ComboBox()
+        parent_combo.setMinimumHeight(ds.field_height)
+        layout.addWidget(parent_combo)
+
+        self._search_parents_data = []
 
         def on_search(text):
-            if len(text.strip()) < 3:
-                result_list.clear()
+            if len(text.strip()) < 2:
+                parent_combo.clear()
+                self._search_parents_data.clear()
                 return
             conn = db.server_conn
             if not conn:
@@ -3186,38 +3201,45 @@ class StudentCreateDialog(ThemedDialog):
                 q = "%" + text.strip() + "%"
                 cur.execute(
                     """
-                    SELECT id, last_name, first_name, email
-                    FROM larcauth_aecuser
-                    WHERE type_parentutor = TRUE
-                      AND (LOWER(last_name) LIKE LOWER(%s) OR LOWER(first_name) LIKE LOWER(%s) OR LOWER(email) LIKE LOWER(%s))
-                      AND id NOT IN (SELECT parent_id FROM student_parent WHERE student_id = %s)
-                    ORDER BY last_name, first_name LIMIT 50
+                    SELECT aec.id, aec.last_name, aec.first_name, aec.email
+                    FROM larcauth_aecuser aec
+                    JOIN larcauth_parent par ON par.aecuser_ptr_id = aec.id
+                    WHERE aec.is_active = TRUE
+                      AND par.enabled = TRUE
+                      AND (LOWER(aec.last_name) LIKE LOWER(%s) OR LOWER(aec.first_name) LIKE LOWER(%s) OR LOWER(aec.email) LIKE LOWER(%s))
+                      AND aec.id NOT IN (SELECT parent_id FROM larcauth_student_parent WHERE student_id = %s)
+                    ORDER BY aec.last_name, aec.first_name LIMIT 50
                 """,
                     (q, q, q, self._sid),
                 )
-                result_list.clear()
-                self._search_parents_data = []
+                parent_combo.clear()
+                self._search_parents_data.clear()
                 for pid, ln, fn, em in cur.fetchall():
-                    result_list.addItem(f"{ln or ''} {fn or ''} ({em or 'pas d e-mail'})")
+                    parent_combo.addItem(f"{ln or ''} {fn or ''} ({em or 'pas d e-mail'})", pid)
                     self._search_parents_data.append(pid)
             except Exception as e:
                 log(f"_add_parent_link search: {e}")
 
         search_inp.textChanged.connect(on_search)
-        self._search_parents_data = []
+
+        buttons = M3DialogButtonBox(M3DialogButtonBox.Ok | M3DialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        layout.addWidget(buttons)
 
         if dlg.exec() == M3Dialog.Accepted:
-            cur_sel = result_list.currentRow()
-            if cur_sel < 0 or cur_sel >= len(self._search_parents_data):
+            pid = parent_combo.currentData()
+            if not pid:
+                QMessageBox.warning(self, _("student_form.add_parent"),
+                                    _("parent.error.no_parent_selected"))
                 return
-            pid = self._search_parents_data[cur_sel]
             conn = db.server_conn
             if not conn:
                 return
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "INSERT INTO student_parent (student_id, parent_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                    "INSERT INTO larcauth_student_parent (student_id, parent_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
                     (self._sid, pid),
                 )
             except Exception as e:
@@ -3249,7 +3271,7 @@ class StudentCreateDialog(ThemedDialog):
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE student_parent SET nature = %s WHERE student_id = %s AND parent_id = %s",
+                "UPDATE larcauth_student_parent SET nature = %s WHERE student_id = %s AND parent_id = %s",
                 (nature.strip(), self._sid, pid),
             )
             self._load_parents()
@@ -3277,7 +3299,7 @@ class StudentCreateDialog(ThemedDialog):
             return
         try:
             cur = conn.cursor()
-            cur.execute("DELETE FROM student_parent WHERE student_id = %s AND parent_id = %s", (self._sid, pid))
+            cur.execute("DELETE FROM larcauth_student_parent WHERE student_id = %s AND parent_id = %s", (self._sid, pid))
             self._load_parents()
         except Exception as e:
             log(f"_remove_parent_link: {e}")

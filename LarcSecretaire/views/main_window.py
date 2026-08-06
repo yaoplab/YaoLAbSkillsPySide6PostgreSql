@@ -14,7 +14,7 @@ from LarcSecretaire.views.parent_manager import ParentManager
 from LarcSecretaire.views.student_form import StudentForm
 from LarcSecretaire.views.supervisor_panel import SupervisorPanel
 from phibuilder.phi.scale import SpacingToken
-from phibuilder.widgets.button import M3Button
+from phibuilder.widgets.button import ButtonVariant, M3Button
 from phibuilder.widgets.frame import M3Frame
 from phibuilder.widgets.headerview import M3HeaderView
 from phibuilder.widgets.label import M3Label
@@ -35,7 +35,9 @@ from PySide6.QtCore import QEvent, QMargins, QSize, Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QHBoxLayout,
+    QLabel,
     QMessageBox,
     QTableWidgetItem,
     QVBoxLayout,
@@ -101,7 +103,7 @@ class MainWindow(QWidget):
             {QssHelper.combobox(p, d)}
             {QssHelper.kpi_common(p, d, s)}
             QFrame#sidebar {{
-                background: {p.surface}; border-right: 1px solid {p.outline_variant};
+                background: {p.surface}; border: none;
             }}
             QLabel#kpi_small_value {{
                 font-size: {s(18)}px; font-weight: bold; color: {p.primary};
@@ -196,17 +198,19 @@ class MainWindow(QWidget):
         self._theme_btn.setMenu(self._theme_menu)
         top_layout.addWidget(self._theme_btn)
 
-        # Profile button
+        # Profile button — initiales de l'utilisateur
         initials = "".join(w[0].upper() for w in session.full_name.split() if w)[:2] or "?"
+        btn_size = 42
         self._profile_btn = M3ProfileButton(initials)
-        self._profile_btn.setFixedSize(theme_manager.image.profile_btn, theme_manager.image.profile_btn)
+        self._profile_btn.setFixedSize(btn_size, btn_size)
         self._profile_btn.setCursor(Qt.PointingHandCursor)
         self._profile_btn.setStyleSheet(
             f"QPushButton {{ background: {theme_manager.palette.primary}; "
             f"color: {theme_manager.palette.on_primary}; font-weight: bold; "
-            f"font-size: {theme_manager.font_size(13)}px; border: none; border-radius: 17px; padding: 0px; }}"
+            f"font-size: 14px; border: none; border-radius: {btn_size//2}px; "
+            f"text-align: center; padding: 0px; }}"
             f"QPushButton:hover {{ background: {theme_manager.palette.active}; }}"
-            f"QPushButton::menu-indicator {{ image: none; }}"
+            f"QPushButton::menu-indicator {{ image: none; width: 0px; }}"
         )
         self._profile_menu = M3Menu(self)
         prefs_action = self._profile_menu.addAction(
@@ -256,9 +260,17 @@ class MainWindow(QWidget):
         self._parent_manager = ParentManager()
         self._content_stack.addWidget(self._parent_manager)
 
-        # Page 3 : Fiche élève
+        # Page 3 : Fiche eleve
         self._student_form = StudentForm()
         self._content_stack.addWidget(self._student_form)
+
+        # Page 4 : A faire (todo list secretariat)
+        from LarcSecretaire.views.todo_panel import TodoPanel
+        self._todo_panel = TodoPanel()
+        self._content_stack.addWidget(self._todo_panel)
+
+        # Rafraichir les photos quand on revient au panneau de supervision
+        self._content_stack.currentChanged.connect(self._on_page_changed)
 
         main_h.addWidget(self._content_stack, 1)
         outer.addLayout(main_h, 1)
@@ -279,30 +291,28 @@ class MainWindow(QWidget):
 
     def _build_sidebar(self):
         p = theme_manager.palette
+        d = theme_manager.design
         sp = self._sp
         s = theme_manager.font_size
 
         self._clear_layout(self._sidebar_layout)
         self._selected_btn = None
 
-        # Tableau de bord — NavButton partagé
-        self._sidebar_layout.addWidget(
-            NavButton(
-                _("sec_main.dashboard"),
-                icon_name="dashboard",
-                on_click=lambda: self._set_scope("school"),
-            )
-        )
+        dash_btn = M3Button(_("sec_main.dashboard"))
+        dash_btn.setMinimumHeight(ds.field_height + ds.space_xs)
+        dash_btn.setCursor(Qt.PointingHandCursor)
+        dash_btn.setIcon(md3_icon("dashboard", color=p.text_soft, size=theme_manager.image.icon_btn))
+        dash_btn.setIconSize(QSize(theme_manager.image.icon_btn, theme_manager.image.icon_btn))
+        dash_btn.setStyleSheet(
+            f"M3Button {{ background: {p.surface_variant}; color: {p.text_strong}; "
+            f"border: none; border-radius: {ds.radius_sm}px; "
+            f"font-size: {s(12)}px; padding: {ds.space_xs}px {ds.space_sm}px; "
+            f"text-align: left; }}"
+            f"M3Button:hover {{ background: {p.primary_container}; }}")
+        dash_btn.clicked.connect(lambda: self._set_scope("school"))
+        self._sidebar_layout.addWidget(dash_btn)
 
-        # ── Séparateur ──
-        sep = M3Frame()
-        sep.setFixedHeight(1)
-        sep.setAttribute(Qt.WA_StyledBackground, True)
-        sep.setStyleSheet(f"M3Frame {{ background: {p.outline_variant}; }}")
-        self._sidebar_layout.addWidget(sep)
-        self._sidebar_layout.addSpacing(sp(SpacingToken.SM))
-
-        # ---- SidebarWidget partagé pour les sections classes (Sous-système K) ----
+        # ---- SidebarWidget partage pour les sections classes (Sous-systeme K) ----
         _sections = [
             (_("sec_main.college"), [("PEI", "PEI"), ("MYP", "MYP")]),
             (_("sec_main.lycee"), [("DP", "DPFr"), ("DPEn", "DPEn")]),
@@ -313,29 +323,54 @@ class MainWindow(QWidget):
             "DPFr": ("error", "error_container", "on_error"),
             "DPEn": ("tertiary", "tertiary_container", "on_tertiary"),
         }
+        search_btn = M3Button(_("sec_main.search"))
+        search_btn.setMinimumHeight(ds.field_height + ds.space_xs)
+        search_btn.setCursor(Qt.PointingHandCursor)
+        search_btn.setIcon(md3_icon("search", color=p.text_soft, size=theme_manager.image.icon_btn))
+        search_btn.setIconSize(QSize(theme_manager.image.icon_btn, theme_manager.image.icon_btn))
+        search_btn.setStyleSheet(
+            f"M3Button {{ background: {p.surface_variant}; color: {p.text_strong}; "
+            f"border: none; border-radius: {ds.radius_sm}px; "
+            f"font-size: {s(12)}px; padding: {ds.space_xs}px {ds.space_sm}px; "
+            f"text-align: left; }}"
+            f"M3Button:hover {{ background: {p.primary_container}; }}")
+        search_btn.clicked.connect(lambda: self._safe_switch(3, "StudentForm"))
+        self._sidebar_layout.addWidget(search_btn)
+
+        parents_btn = M3Button(_("sec_main.parents"))
+        parents_btn.setMinimumHeight(ds.field_height + ds.space_xs)
+        parents_btn.setCursor(Qt.PointingHandCursor)
+        parents_btn.setIcon(md3_icon("person", color=p.text_soft, size=theme_manager.image.icon_btn))
+        parents_btn.setIconSize(QSize(theme_manager.image.icon_btn, theme_manager.image.icon_btn))
+        parents_btn.setStyleSheet(
+            f"M3Button {{ background: {p.surface_variant}; color: {p.text_strong}; "
+            f"border: none; border-radius: {ds.radius_sm}px; "
+            f"font-size: {s(12)}px; padding: {ds.space_xs}px {ds.space_sm}px; "
+            f"text-align: left; }}"
+            f"M3Button:hover {{ background: {p.primary_container}; }}")
+        parents_btn.clicked.connect(lambda: self._content_stack.setCurrentIndex(2))
+        self._sidebar_layout.addWidget(parents_btn)
+
+        todo_btn = M3Button(_("todo.title"))
+        todo_btn.setMinimumHeight(ds.field_height + ds.space_xs)
+        todo_btn.setCursor(Qt.PointingHandCursor)
+        todo_btn.setIcon(md3_icon("event", color=p.text_soft, size=theme_manager.image.icon_btn))
+        todo_btn.setIconSize(QSize(theme_manager.image.icon_btn, theme_manager.image.icon_btn))
+        todo_btn.setStyleSheet(
+            f"M3Button {{ background: {p.surface_variant}; color: {p.text_strong}; "
+            f"border: none; border-radius: {ds.radius_sm}px; "
+            f"font-size: {s(12)}px; padding: {ds.space_xs}px {ds.space_sm}px; "
+            f"text-align: left; }}"
+            f"M3Button:hover {{ background: {p.primary_container}; }}")
+        todo_btn.clicked.connect(lambda: self._content_stack.setCurrentIndex(4))
+        self._sidebar_layout.addWidget(todo_btn)
+
         # Créer un nouveau SidebarWidget à chaque rebuild
         self._class_sidebar = SidebarWidget(_sections, _prog_style)
         self._class_sidebar.group_selected.connect(self._on_sidebar_group_selected)
         self._class_sidebar.class_selected.connect(lambda cid, label: self._on_class_clicked(cid))
         self._class_sidebar.load_classes(self._classes)
-        self._sidebar_layout.addWidget(self._class_sidebar)
-
-        # ── Gestion — NavButtons partagés ──
-        self._sidebar_layout.addWidget(
-            NavButton(
-                _("sec_main.search"),
-                icon_name="search",
-                on_click=lambda: self._content_stack.setCurrentIndex(3),
-            )
-        )
-
-        self._sidebar_layout.addWidget(
-            NavButton(
-                _("sec_main.parents"),
-                icon_name="person",
-                on_click=lambda: self._content_stack.setCurrentIndex(2),
-            )
-        )
+        self._sidebar_layout.addWidget(self._class_sidebar, 1)  # stretch=1 → prend l'espace restant
 
         self._sidebar_layout.addStretch()
 
@@ -360,7 +395,7 @@ class MainWindow(QWidget):
         self._update_scope_label()
         layout.addWidget(self._scope_label)
 
-        # KPIs
+        # KPIs — rangée 1 (effectifs)
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(ds.space_xs)
         self._kpi_widgets = {}
@@ -373,7 +408,7 @@ class MainWindow(QWidget):
         ]:
             f = M3Frame()
             f.setObjectName("kpi_card")
-            f.setFixedHeight(ds.kpi_card_height)  # harmonisé avec LarcSuperviseur
+            f.setFixedHeight(ds.kpi_card_height)
             fl = QVBoxLayout(f)
             fl.setAlignment(Qt.AlignCenter)
             v = M3Label("—")
@@ -389,6 +424,44 @@ class MainWindow(QWidget):
             kpi_row.addWidget(f, 1)
         layout.addLayout(kpi_row)
 
+        # KPIs — rangée 2 (actions secrétariat, cliquables)
+        kpi_row2 = QHBoxLayout()
+        kpi_row2.setSpacing(ds.space_xs)
+        self._action_kpis = {}
+        for key, label, icon_name, color_role in [
+            ("no_photo", _("sec_main.kpi.no_photo"), "person", "error"),
+            ("no_parent", _("sec_main.kpi.no_parent"), "person", "tertiary"),
+            ("no_email", _("sec_main.kpi.no_email"), "mail", "secondary"),
+            ("no_doc", _("sec_main.kpi.no_doc"), "description", "primary"),
+        ]:
+            f = M3Frame()
+            f.setObjectName("kpi_small")
+            f.setFixedHeight(ds.kpi_card_height)
+            f.setCursor(Qt.PointingHandCursor)
+            fl = QVBoxLayout(f)
+            fl.setAlignment(Qt.AlignCenter)
+            fl.setSpacing(ds.space_xxs)
+            # Icône + valeur sur la même ligne
+            icon_row = QHBoxLayout()
+            icon_row.setAlignment(Qt.AlignCenter)
+            icon_row.setSpacing(ds.space_xxs)
+            ico = QLabel()
+            ico.setPixmap(md3_icon(icon_name, color=getattr(ds.p, color_role), size=16).pixmap(16, 16))
+            icon_row.addWidget(ico)
+            v = M3Label("—")
+            v.setObjectName("kpi_small_value")
+            v.setAlignment(Qt.AlignCenter)
+            icon_row.addWidget(v)
+            fl.addLayout(icon_row)
+            l = M3Label(label)
+            l.setObjectName("kpi_small_label")
+            l.setAlignment(Qt.AlignCenter)
+            fl.addWidget(l)
+            f.mousePressEvent = lambda ev, k=key: self._on_action_kpi(k)
+            self._action_kpis[key] = v
+            kpi_row2.addWidget(f, 1)
+        layout.addLayout(kpi_row2)
+
         # Corps : tables à gauche, graphiques à droite
         body_row = QHBoxLayout()
         body_row.setSpacing(ds.space_sm)
@@ -402,12 +475,11 @@ class MainWindow(QWidget):
         left_col.addWidget(self._dashboard_title)
 
         self._dashboard_table = M3TableWidget()
-        self._dashboard_table.setColumnCount(8)
+        self._dashboard_table.setColumnCount(6)
         self._dashboard_table.setHorizontalHeaderLabels(
             [
-                _("sec_main.stats_class_headers"),
+                "Pgm",
                 _("sec_main.stats_class_headers_active"),
-                _("sec_main.stats_class_headers_seats"),
                 _("sec_main.stats_class_headers_rate"),
                 _("sec_main.stats_class_headers_male"),
                 _("sec_main.stats_class_headers_female"),
@@ -415,9 +487,11 @@ class MainWindow(QWidget):
             ]
         )
         hdr = self._dashboard_table.horizontalHeader()
-        for i in range(7):
+        for i in range(6):
             hdr.setSectionResizeMode(i, M3HeaderView.Stretch)
+            hdr.setMinimumSectionSize(40)
         self._dashboard_table.setMaximumHeight(ds.sp(SpacingToken.HUGE) + ds.sp(SpacingToken.HUGE))
+        self._dashboard_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._dashboard_table.setEditTriggers(M3TableWidget.NoEditTriggers)
         self._dashboard_table.verticalHeader().setDefaultAlignment(Qt.AlignCenter)
         self._dashboard_table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
@@ -596,7 +670,6 @@ class MainWindow(QWidget):
                     [
                         sigle,
                         str(actifs),
-                        str(slots),
                         taux,
                         str(garcons),
                         str(filles),
@@ -660,27 +733,56 @@ class MainWindow(QWidget):
             )
             self._populate_niveau_chart(cur.fetchall())
 
-            # Alertes
-            cur.execute(
-                """
-                SELECT COUNT(*)
-                FROM larcauth_student s
-                WHERE s.enabled = TRUE
-                  AND s.s_classroom_id IN (
-                      SELECT c.id FROM larcauth_classroom c
-                      JOIN larcauth_level l ON l.id = c.fk_level_id
-                      JOIN larcauth_program pr ON pr.id = l.fk_program_id
-                      WHERE pr.sigle IN %s
-                  )
-                  AND NOT EXISTS (
-                      SELECT 1 FROM larcauth_aecuser p
-                      WHERE p.id = s.aecuser_ptr_id AND p.fk_parent_id IS NOT NULL
-                  )
-            """,
-                (_SEC_PROGS,),
-            )
-            no_parent = cur.fetchone()[0]
-            self._alert_label.setText(_("sec_main.alert_students").format(n=no_parent) if no_parent else _("sec_main.alert_none"))
+            # ── KPIs actionnables (chaque requête est protégée) ──
+            _class_filter = """
+                AND s.s_classroom_id IN (
+                    SELECT c.id FROM larcauth_classroom c
+                    JOIN larcauth_level l ON l.id = c.fk_level_id
+                    JOIN larcauth_program pr ON pr.id = l.fk_program_id
+                    WHERE pr.sigle IN %s
+                )
+            """
+            alerts = []
+
+            def _safe_count(label, sql, params=None):
+                """Exécute une requête COUNT de manière protégée."""
+                try:
+                    cur.execute(sql, params or ())
+                    return cur.fetchone()[0]
+                except Exception as e:
+                    log(f"KPI {label}: {e}")
+                    return 0
+
+            no_parent = _safe_count("no_parent",
+                f"SELECT COUNT(*) FROM larcauth_student s WHERE s.enabled = TRUE {_class_filter}"
+                f" AND (s.validation->'parent'->>'ok')::boolean IS NOT TRUE",
+                (_SEC_PROGS,))
+            self._action_kpis["no_parent"].setText(str(no_parent))
+
+            no_email = _safe_count("no_email",
+                f"SELECT COUNT(*) FROM larcauth_student s"
+                f" JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id"
+                f" WHERE s.enabled = TRUE {_class_filter}"
+                f" AND (aec.email IS NULL OR aec.email = '' OR (s.validation->'email'->>'ok')::boolean IS NOT TRUE)",
+                (_SEC_PROGS,))
+            self._action_kpis["no_email"].setText(str(no_email))
+
+            no_doc = _safe_count("no_doc",
+                f"SELECT COUNT(*) FROM larcauth_student s WHERE s.enabled = TRUE {_class_filter}"
+                f" AND (s.validation->'dossier'->>'ok')::boolean IS NOT TRUE",
+                (_SEC_PROGS,))
+            self._action_kpis["no_doc"].setText(str(no_doc))
+
+            no_photo = _safe_count("no_photo",
+                f"SELECT COUNT(*) FROM larcauth_student s WHERE s.enabled = TRUE {_class_filter}"
+                f" AND (s.validation->'photo'->>'ok')::boolean IS NOT TRUE",
+                (_SEC_PROGS,))
+            self._action_kpis["no_photo"].setText(str(no_photo))
+
+            if no_parent: alerts.append(_("sec_main.alert_no_parent").format(n=no_parent))
+            if no_email: alerts.append(_("sec_main.alert_no_email").format(n=no_email))
+            if no_doc: alerts.append(_("sec_main.alert_no_doc").format(n=no_doc))
+            self._alert_label.setText(" · ".join(alerts) if alerts else _("sec_main.alert_none"))
 
             # Classes pour la sidebar
             cur.execute(
@@ -702,6 +804,136 @@ class MainWindow(QWidget):
         except Exception as e:
             log(f"_load_initial_data: {e}")
             self._status_bar.setText(_("sec_main.loading_error").format(e=e))
+
+    def _on_action_kpi(self, key: str):
+        """Affiche la liste detaillee quand un KPI d action est clique."""
+        conn = db.server_conn
+        if not conn:
+            return
+        titles = {
+            "no_photo": _("sec_main.kpi.no_photo"),
+            "no_parent": _("sec_main.kpi.no_parent"),
+            "no_email": _("sec_main.kpi.no_email"),
+            "no_doc": _("sec_main.kpi.no_doc"),
+        }
+        queries = {
+            "no_photo": """
+                SELECT aec.last_name || ' ' || aec.first_name AS name, c.label AS class
+                FROM larcauth_student s
+                JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                WHERE s.enabled = TRUE AND (s.validation->'photo'->>'ok')::boolean IS NOT TRUE
+                ORDER BY c.label, aec.last_name LIMIT 200
+            """,
+            "no_parent": """
+                SELECT aec.last_name || ' ' || aec.first_name AS name, c.label AS class
+                FROM larcauth_student s
+                JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                WHERE s.enabled = TRUE AND (s.validation->'parent'->>'ok')::boolean IS NOT TRUE
+                ORDER BY c.label, aec.last_name LIMIT 200
+            """,
+            "no_email": """
+                SELECT aec.last_name || ' ' || aec.first_name AS name, c.label AS class
+                FROM larcauth_student s
+                JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                WHERE s.enabled = TRUE AND (s.validation->'email'->>'ok')::boolean IS NOT TRUE
+                ORDER BY c.label, aec.last_name LIMIT 200
+            """,
+            "no_doc": """
+                SELECT aec.last_name || ' ' || aec.first_name AS name, c.label AS class
+                FROM larcauth_student s
+                JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                WHERE s.enabled = TRUE AND (s.validation->'dossier'->>'ok')::boolean IS NOT TRUE
+                ORDER BY c.label, aec.last_name LIMIT 200
+            """,
+        }
+        sql = queries.get(key)
+        if not sql:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(sql)
+            rows = cur.fetchall()
+        except Exception:
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle(titles.get(key, key))
+        dlg.setMinimumSize(500, 400)
+        dlg.setStyleSheet(f"background: {ds.p.surface};")
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+        layout.setSpacing(ds.space_sm)
+
+        info = M3Label(_("sec_main.kpi_count").format(n=len(rows)))
+        info.setStyleSheet(f"color: {ds.p.text_soft}; font-weight: bold;")
+        layout.addWidget(info)
+
+        table = M3TableWidget()
+        table.set_headers([_("student_form.table_headers"), _("student_form.table_headers_class")])
+        table.horizontalHeader().setStretchLastSection(True)
+        table.setStyleSheet(ds.table_qss())
+        table.setRowCount(len(rows))
+        for i, (name, cls) in enumerate(rows):
+            table.setItem(i, 0, QTableWidgetItem(name))
+            table.setItem(i, 1, QTableWidgetItem(cls))
+        table.resizeColumnsToContents()
+        layout.addWidget(table, 1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(ds.space_sm)
+        create_btn = M3Button(_("todo.create_tasks"), variant=ButtonVariant.FILLED)
+        create_btn.clicked.connect(lambda: (
+            self._create_tasks_from_rows(rows, key),
+            dlg.accept()
+        ))
+        btn_row.addWidget(create_btn)
+        close_btn = M3Button(_("supervisor.close_button"), variant=ButtonVariant.OUTLINED)
+        close_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(close_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        dlg.exec()
+
+    def _create_tasks_from_rows(self, rows: list, task_type: str):
+        """Cree des taches todo a partir d une liste d eleves."""
+        conn = db.server_conn
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            for name, cls in rows:
+                cur.execute(
+                    "INSERT INTO secretary_todo (task_type, description, created_by) VALUES (%s, %s, %s)",
+                    (task_type, f"{name} — {cls}", session.user_id))
+            conn.commit()
+            self._todo_panel.reload()
+            self._content_stack.setCurrentIndex(4)  # Aller au panneau Todo
+        except Exception as e:
+            conn.rollback()
+            log(f"_create_tasks_from_rows: {e}")
+
+    @safe_slot("MainWindow.on_page_changed")
+    def _safe_switch(self, index: int, name: str):
+        """Bascule vers la page index avec log de debug."""
+        try:
+            log(f"MainWindow._safe_switch: switching to {name} (index {index})")
+            self._content_stack.setCurrentIndex(index)
+            log(f"MainWindow._safe_switch: OK")
+        except Exception as e:
+            log(f"MainWindow._safe_switch: ERROR {e}")
+            import traceback
+            log(traceback.format_exc())
+
+    def _on_page_changed(self, index: int):
+        if index == 1:  # Page Supervision
+            self._supervisor_panel.refresh_photos()
+        elif index == 4:  # Page Todo
+            self._todo_panel.reload()
 
     @safe_slot("MainWindow.on_sidebar_group_selected")
     def _on_sidebar_group_selected(self, group: str):
@@ -796,7 +1028,6 @@ class MainWindow(QWidget):
         """Alias pour D7 : _restyle_all() met à jour tous les widgets avec les couleurs actuelles."""
         self._restyle_all()
 
-    @safe_slot("Unknown._restyle_all")
     def _restyle_all(self):
         p = theme_manager.palette
         s = theme_manager.font_size
@@ -814,10 +1045,10 @@ class MainWindow(QWidget):
         self._network_label.setStyleSheet(f"font-size: {s(12)}px; font-weight: bold;")
         self._profile_btn.setStyleSheet(
             f"QPushButton {{ background: {p.primary}; color: {p.on_primary}; "
-            f"font-weight: bold; font-size: {s(13)}px; border: none; "
-            f"border-radius: 17px; padding: 0px; }}"
+            f"font-weight: bold; font-size: 14px; border: none; "
+            f"border-radius: 21px; text-align: center; padding: 0px; }}"
             f"QPushButton:hover {{ background: {p.active}; }}"
-            f"QPushButton::menu-indicator {{ image: none; }}"
+            f"QPushButton::menu-indicator {{ image: none; width: 0px; }}"
         )
 
         # KPI via QssHelper.kpi_common() dans _style() — pas de QSS inline redondant
@@ -845,7 +1076,6 @@ class MainWindow(QWidget):
         self._clock_timer.timeout.connect(self._update_datetime)
         self._clock_timer.start(10000)
 
-    @safe_slot("Unknown._update_datetime")
     def _update_datetime(self):
         from datetime import datetime
 

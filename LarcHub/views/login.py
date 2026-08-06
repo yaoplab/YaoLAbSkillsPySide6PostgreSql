@@ -63,7 +63,7 @@ class LoginWindow(QWidget):
         hdr.setStyleSheet(f"font-size: {theme_manager.font_size(21)}px; font-weight: bold; color: {theme_manager.palette.primary};")
         vbox.addWidget(hdr)
 
-        sub = M3Label("Supervision · Secrétariat · Coordination")
+        sub = M3Label("Supervision · Secrétariat · Configuration · Bulletins · RH · Comptabilités")
         sub.setAlignment(Qt.AlignCenter)
         sub.setStyleSheet(f"font-size: {theme_manager.font_size(11)}px; color: {theme_manager.palette.text_strong};")
         vbox.addWidget(sub)
@@ -150,7 +150,7 @@ class LoginWindow(QWidget):
         self._busy = busy
         self._tabs.setEnabled(not busy)
 
-    @safe_slot("Unknown._on_intranet")
+    @safe_slot("LoginWindow._on_intranet")
     def _on_intranet(self):
         if self._busy:
             return
@@ -171,7 +171,7 @@ class LoginWindow(QWidget):
             return False, None, "Connexion à l'intranet impossible"
         return AuthManager.auth_intranet(email, pwd)
 
-    @safe_slot("Unknown._on_cloud")
+    @safe_slot("LoginWindow._on_cloud")
     def _on_cloud(self):
         if self._busy:
             return

@@ -12,19 +12,49 @@ if os.path.isdir(_larc_common) and _larc_common not in sys.path:
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
 from larccommon.l10n import _
+from larccommon.safe_slot import set_debug
+
+
+def _ensure_student_parent(conn) -> None:
+    """Cree la table larcauth_student_parent si elle n'existe pas."""
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS larcauth_student_parent (
+                id            SERIAL PRIMARY KEY,
+                student_id    INTEGER NOT NULL,
+                parent_id     INTEGER NOT NULL,
+                nature        TEXT,
+                is_emergency  BOOLEAN NOT NULL DEFAULT FALSE,
+                is_authorized BOOLEAN NOT NULL DEFAULT TRUE,
+                updated_at    TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (student_id, parent_id)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_student_parent_student ON larcauth_student_parent(student_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_student_parent_parent  ON larcauth_student_parent(parent_id)")
+    except Exception:
+        pass
 
 
 def main() -> None:
+    import faulthandler, time
+    faulthandler.enable()
+    time.sleep(0.05)  # laisser Windows initialiser COM
+
+    set_debug(True)  # Dev: affiche les erreurs dans les slots
     app = QApplication(sys.argv)
     app.setApplicationName("LarcSecretaire")
     app.setOrganizationName("LarcSpace")
-    app.setFont(QFont("Roboto", 10))
+    app.setFont(QFont("Segoe UI", 10))
 
     from larccommon.l10n import Translator
     lang = os.environ.get("LARC_LANG", "fr")
     Translator.instance(lang).load_dir(Translator.l10n_dir())
 
-    from LarcSecretaire.common.database import db
+    from LarcSecretaire.common.database import db, DBMode
     from LarcSecretaire.common.logger import log
     from LarcSecretaire.common.app_config import app_config
     from LarcSecretaire.common.sqlite_init import sqlite_init
@@ -35,6 +65,25 @@ def main() -> None:
     db.connect_intranet()
     if not db.server_conn:
         db.connect_cloud()
+    # S'assurer que les tables applicatives existent (intranet + cloud)
+    from LarcSecretaire.views.todo_panel import ensure_todo_table
+    ensure_todo_table()
+    # Table de jonction eleves-parents
+    _ensure_student_parent(db.server_conn)
+    if db.server_mode != DBMode.CLOUD:
+        db.connect_cloud()
+        ensure_todo_table()
+        _ensure_student_parent(db.server_conn)
+        db.connect_intranet()
+    # S'assurer que la colonne JSONB validation existe
+    _cur = db.server_conn.cursor() if db.server_conn else None
+    if _cur:
+        try:
+            _cur.execute(
+                "ALTER TABLE larcauth_student ADD COLUMN IF NOT EXISTS validation JSONB DEFAULT '{}'")
+            db.server_conn.commit()
+        except Exception:
+            db.server_conn.rollback()
     sqlite_init.init()
     app_config.load()
     log("LarcSecretaire démarré")

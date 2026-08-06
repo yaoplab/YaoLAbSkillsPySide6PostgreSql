@@ -29,6 +29,7 @@ from PySide6.QtCharts import (
 from PySide6.QtCore import QDate, QDateTime, QEvent, QSize, Qt, QTime, QTimer
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter
 from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QDialog,
     QGridLayout,
@@ -55,6 +56,7 @@ from LarcSuperviseur.views.dialogs.timetable_editor import TimetableEditor
 from LarcSuperviseur.views.panels.student_detail import StudentDetail
 from LarcSuperviseur.views.top_bar import TopBar
 from larccommon.widgets.sidebar import SidebarWidget
+from larccommon.widgets.skeleton import M3Skeleton
 from larccommon.widgets.themed_widget import ThemedWidget
 
 
@@ -303,7 +305,7 @@ class MainWindow(QWidget):
         filter_row.addSpacing(ds.space_xs)
         filter_btn = M3Button(_("history.filter_button"))
         filter_btn.setCursor(Qt.PointingHandCursor)
-        filter_btn.clicked.connect(lambda: self._load_global_history(self._current_group_mode))
+        filter_btn.clicked.connect(self._on_filter_history)
         filter_row.addWidget(filter_btn)
         filter_row.addStretch()
         self._history_layout.addLayout(filter_row)
@@ -510,12 +512,21 @@ class MainWindow(QWidget):
         cards_frame_layout.addLayout(cards_absents_row)
         self._class_stack.addWidget(cards_frame)  # index 0
 
-        # -- Page 1 : Détail élève --
+        # -- Page 1 : Skeleton loading --
+        self._cards_skeleton_page = QWidget()
+        sk_layout = QVBoxLayout(self._cards_skeleton_page)
+        sk_layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+        sk_layout.setAlignment(Qt.AlignCenter)
+        self._cards_skeleton = M3Skeleton.table(self._cards_skeleton_page, rows=6, cols=4)
+        self._cards_skeleton.set_label(_("topbar.loading_students"))
+        sk_layout.addWidget(self._cards_skeleton)
+        self._class_stack.addWidget(self._cards_skeleton_page)  # index 1
+
+        # -- Page 2 : Detail eleve --
         self._build_student_detail()
 
         class_layout.addWidget(self._class_stack)
-        # Ajouter le détail élève au stack (page 1)
-        self._class_stack.addWidget(self._student_detail)  # index 1
+        self._class_stack.addWidget(self._student_detail)  # index 2
 
         self._content_stack.addWidget(self._group_scroll)  # 0
         self._content_stack.addWidget(self._class_page)  # 1
@@ -727,9 +738,10 @@ class MainWindow(QWidget):
         try:
             cur = conn.cursor()
 
-            # Terme actif (via academicyear)
+            # Terme actif + annee academique (via academicyear)
             cur.execute("""
-                SELECT t.id, t.label FROM larcauth_term t, larcauth_academicyear ay
+                SELECT t.id, t.label, ay.label
+                FROM larcauth_term t, larcauth_academicyear ay
                 WHERE ay.s_id = 1 AND t.trim = ay.current_term_number
                 LIMIT 1
             """)
@@ -737,9 +749,13 @@ class MainWindow(QWidget):
             if r:
                 self._time_manager.term_id = int(r[0])
                 self._time_manager.term_label = r[1]
+                session.term_id = int(r[0])
+                session.term_label = f"{r[2]} — {r[1]}"
             else:
                 self._time_manager.term_id = 0
                 self._time_manager.term_label = ""
+                session.term_id = 0
+                session.term_label = ""
 
             # Programmes (PEI, DP, ...)
             cur.execute("SELECT id, sigle, label FROM larcauth_program ORDER BY sigle")
@@ -1124,6 +1140,10 @@ class MainWindow(QWidget):
             log(f"_load_group_stats: {e}")
             self._top_bar.set_loading(False)
 
+    @safe_slot("MainWindow.on_filter_history")
+    def _on_filter_history(self):
+        self._load_global_history(self._current_group_mode)
+
     def _load_global_history(self, mode: str):
         self._top_bar.set_loading(True, _("topbar.loading_events"))
         conn = db.server_conn
@@ -1293,20 +1313,27 @@ class MainWindow(QWidget):
         self._selected_student_id = 0
 
     def _load_students(self, class_id: int):
-        self._top_bar.set_loading(True, _("topbar.loading_students"))
-        conn = db.server_conn
-        if not conn or not self._time_manager.term_id:
-            self._top_bar.set_loading(False)
+        if getattr(self, "_loading_students", False):
             return
-
-        today = QDate.currentDate().toString("yyyy-MM-dd")
-
+        self._loading_students = True
         try:
+            self._top_bar.set_loading(True, _("topbar.loading_students"))
+            # Afficher le skeleton
+            self._class_stack.setCurrentIndex(1)
+            self._cards_skeleton.start()
+            QApplication.processEvents()
+            conn = db.server_conn
+            if not conn or not self._time_manager.term_id:
+                return
+
+            today = QDate.currentDate().toString("yyyy-MM-dd")
+
             cur = conn.cursor()
             cur.execute(
                 """
                 SELECT s.aecuser_ptr_id,
-                       aec.last_name, aec.first_name
+                       aec.last_name, aec.first_name,
+                       COALESCE(s.validation, '{}'::jsonb) AS validation
                 FROM larcauth_student s
                 JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
                 WHERE s.s_classroom_id = %s AND s.enabled = TRUE
@@ -1316,41 +1343,69 @@ class MainWindow(QWidget):
             )
             rows = cur.fetchall()
 
-            self._students = [{"id": r[0], "last_name": r[1], "first_name": r[2]} for r in rows]
+            self._students = [{"id": r[0], "last_name": r[1], "first_name": r[2],
+                              "validation": r[3]} for r in rows]
 
-            # Stats d'events pour chaque élève
+            # Stats d'events pour chaque eleve
             student_ids = [s["id"] for s in self._students]
+            period_from, period_to = self._time_manager.period_dates()
             event_stats = {}
             if student_ids:
                 ids_sql = ",".join(str(sid) for sid in student_ids)
+                # Sorties : sur la periode (trimestre, mois, etc.)
                 try:
                     cur.execute(
                         f"""
                         SELECT se.student_id,
-                               COUNT(*) FILTER (WHERE se.event_type = %s OR se.event_type ILIKE %s OR se.event_type ILIKE %s) AS exit_count,
-                                CASE WHEN COUNT(*) FILTER (WHERE (se.event_type = %s
-                                    OR se.event_type ILIKE %s OR se.event_type ILIKE %s)
-                                    AND se.validated_by IS NULL) > 0 THEN 'Absent' ELSE 'Présent' END AS presence
+                               COUNT(*) AS exit_count
+                         FROM student_event se
+                         WHERE se.student_id IN ({ids_sql})
+                            AND DATE(se.event_at) BETWEEN %s AND %s
+                            AND (se.event_type = %s OR se.event_type ILIKE %s OR se.event_type ILIKE %s)
+                         GROUP BY se.student_id
+                     """,
+                        (period_from, period_to, "exit", "Sortie%", "%Fuite%"),
+                    )
+                    for sid, exit_count in cur.fetchall():
+                        event_stats.setdefault(sid, {})["exit"] = exit_count
+                except Exception as e:
+                    log(f"_load_students: exit_stats: {e}")
+                # Evenements totaux sur la periode (hors sorties)
+                try:
+                    cur.execute(
+                        f"""
+                        SELECT se.student_id,
+                               COUNT(*) AS total_events
                          FROM student_event se
                          WHERE se.student_id IN ({ids_sql})
                             AND DATE(se.event_at) BETWEEN %s AND %s
                          GROUP BY se.student_id
                      """,
-                        (
-                            "exit",
-                            "Sortie%",
-                            "%Fuite%",
-                            "absence",
-                            "Suivi > Absence%",
-                            "Absence%",
-                            today,
-                            today,
-                        ),
+                        (period_from, period_to),
                     )
-                    for sid, exit_count, presence in cur.fetchall():
-                        event_stats[sid] = {"exit": exit_count, "presence": presence}
+                    for sid, total_events in cur.fetchall():
+                        event_stats.setdefault(sid, {})["total_events"] = total_events
                 except Exception as e:
                     log(f"_load_students: event_stats: {e}")
+                # Presence : aujourd'hui uniquement
+                try:
+                    cur.execute(
+                        f"""
+                        SELECT se.student_id,
+                               CASE WHEN COUNT(*) FILTER (WHERE (se.event_type = %s
+                                   OR se.event_type ILIKE %s OR se.event_type ILIKE %s)
+                                   AND se.validated_by IS NULL) > 0 THEN 'Absent' ELSE 'Present' END AS presence
+                         FROM student_event se
+                         WHERE se.student_id IN ({ids_sql})
+                            AND DATE(se.event_at) = %s
+                         GROUP BY se.student_id
+                     """,
+                        ("absence", "Suivi > Absence%", "Absence%", today),
+                    )
+                    for sid, presence in cur.fetchall():
+                        event_stats.setdefault(sid, {})["presence"] = presence
+                except Exception as e:
+                    log(f"_load_students: presence_stats: {e}")
 
             # Vider les cartes existantes
             for i in reversed(range(self._cards_layout.count())):
@@ -1368,11 +1423,16 @@ class MainWindow(QWidget):
             for idx, s in enumerate(self._students):
                 sid = s["id"]
                 card = StudentCard(sid, s["last_name"], s["first_name"], cfg=cfg)
-                stats = event_stats.get(sid, {"exit": 0, "presence": "Présent"})
-                card.set_exit_count(stats["exit"])
-                is_absent = stats["presence"] == "Absent"
+                card.set_role(StudentCard._ROLE_SUPERVISOR)
+                stats = event_stats.get(sid, {})
+                exit_count = stats.get("exit", 0)
+                total_events = stats.get("total_events", 0)
+                presence = stats.get("presence", "Present")
+                card.set_event_count(total_events)
+                card.set_exit_count(exit_count)
+                is_absent = presence == "Absent"
                 color = theme_manager.palette.error if is_absent else theme_manager.palette.success
-                card.set_status(stats["presence"], color)
+                card.set_status(presence, color)
                 card.set_absent(is_absent)
                 card.clicked.connect(self._on_student_selected)
                 self._cards_layout.addWidget(card, idx // cols, idx % cols, Qt.AlignCenter)
@@ -1408,6 +1468,10 @@ class MainWindow(QWidget):
         except Exception as e:
             log(f"_load_students: {e}")
             self._top_bar.set_loading(False)
+        finally:
+            self._cards_skeleton.stop()
+            self._class_stack.setCurrentIndex(0)
+            self._loading_students = False
 
     @safe_slot("MainWindow.on_student_selected")
     def _on_student_selected(self, student_id: int):

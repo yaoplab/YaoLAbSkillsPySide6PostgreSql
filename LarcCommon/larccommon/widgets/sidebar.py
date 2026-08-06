@@ -106,15 +106,18 @@ class SidebarWidget(M3ScrollArea):
         self._container.setPalette(pal)
         self._container.setAutoFillBackground(True)
 
-        # Layout (K3: ds.space_sm margins, K4: ds.space_xs spacing)
+        # Layout (K3: ds.space_sm vertical margins, K4: ds.space_xs spacing)
+        # Marges horizontales = 0 (le parent sidebar_layout les gere)
         self._layout = QVBoxLayout(self._container)
-        self._layout.setContentsMargins(
-            ds.space_sm, ds.space_sm, ds.space_sm, ds.space_sm
-        )
+        self._layout.setContentsMargins(0, ds.space_sm, 0, ds.space_sm)
         self._layout.setSpacing(ds.space_xs)
 
         # Connexion au changement de thème
         theme_manager.theme_changed.connect(self._rebuild)
+
+    def set_header_widgets(self, widgets: list):
+        """Widgets inseres en haut du sidebar (avant les sections)."""
+        self._header_widgets = widgets
 
     def load_classes(self, classes: list[tuple]):
         """Charge les classes et reconstruit le sidebar."""
@@ -153,13 +156,16 @@ class SidebarWidget(M3ScrollArea):
         # Appliquer le fond DIRECTEMENT sur le conteneur (QScrollArea ne cascade pas fiablement)
         bg = p.surface
         self._container.setStyleSheet(
-            f"background: {bg}; border: none; "
-            f"border-right: 1px solid {p.outline_variant};"
+            f"background: {bg}; border: none;"
         )
         # Guard palette : garantit le fond même si Qt réinitialise le QSS
         pal = self._container.palette()
         pal.setColor(self._container.backgroundRole(), QColor(bg))
         self._container.setPalette(pal)
+
+        # Widgets d'en-tete (boutons d'action, etc.)
+        for w in getattr(self, '_header_widgets', []):
+            self._layout.addWidget(w)
 
         # Grouper les classes par programme
         groups: dict[str, list[tuple[int, str]]] = {k: [] for k in self._prog_style}
@@ -170,12 +176,17 @@ class SidebarWidget(M3ScrollArea):
                     groups[sigle].append((cid, label))
 
         for sec_name, columns in self._sections:
-            # En-tête section (K6: flat divider, style QSS inline sans sélecteur)
+            # En-tête section — fond sombre, texte clair (style bouton proéminent)
             sec_hdr = M3Button(sec_name)
             sec_hdr.setObjectName("sidebar_sec_hdr")
+            sec_hdr.setMinimumHeight(ds.field_height + ds.space_xs)
             sec_hdr.setCursor(Qt.PointingHandCursor)
-            # Utilise QssHelper inline (pas de sélecteur = safe pour widget.setStyleSheet)
-            sec_hdr.setStyleSheet(QssHelper.sidebar_section_header_inline(p, s))
+            sec_hdr.setStyleSheet(
+                f"M3Button {{ background: {p.text_strong}; color: {p.surface}; "
+                f"border: none; border-radius: {ds.radius_sm}px; "
+                f"font-size: {s(12)}px; font-weight: bold; "
+                f"padding: {ds.space_xs}px {ds.space_sm}px; }}"
+                f"M3Button:hover {{ background: {p.primary}; color: {p.on_primary}; }}")
             sec_hdr.clicked.connect(
                 lambda checked, sn=sec_name: self._on_section_clicked(sn)
             )
@@ -218,12 +229,17 @@ class SidebarWidget(M3ScrollArea):
             self._layout.addLayout(grd)
             self._layout.addSpacing(ds.space_xs)
 
-        # Bouton Toutes les classes (K13: primaire, hauteur 55px, QSS sans sélecteur)
+        # Bouton Lycée + Collège (même style que les en-têtes de section)
         self._all_btn = M3Button(_("sidebar.all_classes"))
         self._all_btn.setObjectName("sidebar_all_btn")
-        self._all_btn.setFixedHeight(self.H_ALL)
+        self._all_btn.setMinimumHeight(ds.field_height + ds.space_xs)
         self._all_btn.setCursor(Qt.PointingHandCursor)
-        self._all_btn.setStyleSheet(QssHelper.sidebar_all_button_inline(p, s))
+        self._all_btn.setStyleSheet(
+            f"M3Button {{ background: {p.text_strong}; color: {p.surface}; "
+            f"border: none; border-radius: {ds.radius_sm}px; "
+            f"font-size: {s(12)}px; font-weight: bold; "
+            f"padding: {ds.space_xs}px {ds.space_sm}px; }}"
+            f"M3Button:hover {{ background: {p.primary}; color: {p.on_primary}; }}")
         self._all_btn.clicked.connect(self._on_all_clicked)
         self._layout.addWidget(self._all_btn)
         self._layout.addStretch()

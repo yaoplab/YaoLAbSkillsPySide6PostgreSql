@@ -21,6 +21,7 @@ Usage:
 """
 
 import re
+import io
 import sys
 from pathlib import Path
 
@@ -191,6 +192,12 @@ def check_skill(skill_dir: Path) -> dict:
 
 
 def main():
+    # Force UTF-8 pour la sortie terminal (Windows cp1252 fix)
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
     import argparse
     parser = argparse.ArgumentParser(description="Meta-linter des skills Larc")
     parser.add_argument("--dir", help="Répertoire d'un skill spécifique")

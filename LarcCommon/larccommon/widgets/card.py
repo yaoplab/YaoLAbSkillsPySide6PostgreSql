@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 
@@ -77,6 +77,38 @@ class StudentCard(QFrame):
         layout.addWidget(self._name_label)
         layout.addStretch()
         layout.addWidget(self._photo_badge, 0, Qt.AlignCenter)
+
+        # Q5 : 4 indicateurs D/M/P/E sous la photo (secretariat)
+        self._badge_labels: dict[str, QLabel] = {}
+        _badge_size = 14
+        _badge_font = f"font-size: {max(7, _badge_size - 7)}px; font-weight: bold;"
+        self._badges_row = QHBoxLayout()
+        self._badges_row.setSpacing(2)
+        self._badges_row.setContentsMargins(0, 0, 0, 0)
+        for badge_key, letter in [
+            ("dossier_valid", "D"), ("parent_valid", "M"),
+            ("photo_valid", "P"), ("email_valid", "E"),
+        ]:
+            circle = QLabel(letter)
+            circle.setFixedSize(_badge_size, _badge_size)
+            circle.setAlignment(Qt.AlignCenter)
+            circle.setStyleSheet(
+                f"background: {p.surface}; color: {p.error}; "
+                f"border: 1px solid {p.error}; "
+                f"border-radius: {_badge_size // 2}px; {_badge_font}")
+            self._badges_row.addWidget(circle)
+            self._badge_labels[badge_key] = circle
+        layout.addLayout(self._badges_row)
+
+        # Ligne evenements (superviseur) — cachee par defaut
+        self._evt_label = QLabel()
+        self._evt_label.setAlignment(Qt.AlignCenter)
+        self._evt_label.setStyleSheet(
+            f"font-size: {theme_manager.font_size(10)}px; "
+            f"color: {theme_manager.palette.text_soft};")
+        self._evt_label.hide()
+        layout.addWidget(self._evt_label)
+
         layout.addSpacing(cfg.spacing)
         layout.addWidget(self._status_label)
         layout.addWidget(self._exit_label)
@@ -98,6 +130,19 @@ class StudentCard(QFrame):
             f"}}"
         )
         self.setStyleSheet(self._default_style)
+
+    def refresh_photo(self):
+        """Recharge la photo depuis le disque (apres changement)."""
+        from PySide6.QtGui import QPixmapCache
+        QPixmapCache.clear()
+        pix = QPixmap(get_photo_path(self._sid))
+        if pix.isNull() or pix.size().isNull():
+            pix = make_avatar(self._last_name, self._first_name,
+                            self._cfg.photo_size, self._cfg.avatar_font)
+        else:
+            pix = pix.scaled(self._cfg.photo_size, self._cfg.photo_size,
+                           Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._photo.setPixmap(pix)
 
     def mousePressEvent(self, event):
         self.clicked.emit(self._sid)
@@ -128,3 +173,96 @@ class StudentCard(QFrame):
                 f"}}")
         else:
             self.setStyleSheet(self._default_style)
+
+    # ── Champs etendus (secretaire, superviseur) ──
+
+    def set_classroom(self, text: str):
+        """Affiche la classe sous le nom."""
+        if not hasattr(self, '_classroom_label'):
+            self._classroom_label = QLabel()
+            self._classroom_label.setAlignment(Qt.AlignCenter)
+            self.layout().insertWidget(2, self._classroom_label)
+        s = theme_manager.font_size
+        p = theme_manager.palette
+        self._classroom_label.setText(text)
+        self._classroom_label.setStyleSheet(
+            f"font-size: {s(11)}px; color: {p.text_soft};")
+
+    def set_presence(self, status: str):
+        """Pastille coloree : present/absent/late/exited."""
+        p = theme_manager.palette
+        colors = {"present": p.success, "absent": p.error,
+                  "late": p.tertiary, "exited": p.secondary}
+        color = colors.get(status, p.text_disabled)
+        labels = {"present": "Present", "absent": "Absent",
+                  "late": "Retard", "exited": "Sorti"}
+        self.set_status(labels.get(status, ""), color)
+
+    _ROLE_SECRETARY = "secretary"
+    _ROLE_SUPERVISOR = "supervisor"
+
+    def set_role(self, role: str):
+        """Configure la vignette pour un role : badges D/M/P/E (secretaire) ou compteurs (superviseur)."""
+        if role == self._ROLE_SECRETARY:
+            self._badges_row is not None  # garde les badges visibles
+            self._evt_label.hide()
+        else:
+            # Superviseur : cacher les badges D/M/P/E, montrer le compteur d'evenements
+            for i in range(self._badges_row.count()):
+                w = self._badges_row.itemAt(i).widget()
+                if w:
+                    w.hide()
+            self._evt_label.show()
+
+    def set_validation(self, validation: dict | None):
+        """Colorie les 4 cercles D/M/P/E selon les flags de validation JSONB."""
+        if not hasattr(self, "_badge_labels") or not self._badge_labels or not validation:
+            return
+        p = theme_manager.palette
+        _badge_size = 14
+        _badge_font = f"font-size: {max(7, _badge_size - 7)}px; font-weight: bold;"
+        for flag_key, badge_key in [
+            ("dossier", "dossier_valid"), ("parent", "parent_valid"),
+            ("photo", "photo_valid"), ("email", "email_valid"),
+        ]:
+            circle = self._badge_labels.get(badge_key)
+            if circle is None:
+                continue
+            entry = validation.get(flag_key, {}) if isinstance(validation, dict) else {}
+            ok = entry.get("ok", False)
+            if ok:
+                circle.setStyleSheet(
+                    f"background: {p.success}; color: {p.on_error}; "
+                    f"border: 1px solid {p.success}; "
+                    f"border-radius: {_badge_size // 2}px; {_badge_font}")
+            else:
+                circle.setStyleSheet(
+                    f"background: {p.surface}; color: {p.error}; "
+                    f"border: 1px solid {p.error}; "
+                    f"border-radius: {_badge_size // 2}px; {_badge_font}")
+
+    def set_event_count(self, count: int):
+        """Nombre d'evenements (superviseur). Masque le label si 0."""
+        if count > 0:
+            self._evt_label.setText(f"{count} evt(s)")
+            self._evt_label.show()
+        else:
+            self._evt_label.hide()
+
+    def set_metrics(self, absences: int = 0, lates: int = 0):
+        """Affiche absences et retards du mois."""
+        if not hasattr(self, '_metrics_label'):
+            self._metrics_label = QLabel()
+            self._metrics_label.setAlignment(Qt.AlignCenter)
+            self.layout().addWidget(self._metrics_label)
+        p = theme_manager.palette
+        s = theme_manager.font_size
+        parts = []
+        if absences > 0:
+            color = p.error if absences >= 10 else p.text_soft
+            parts.append(f"<span style='color:{color}'>{absences} abs</span>")
+        if lates > 0:
+            color = p.tertiary if lates >= 5 else p.text_soft
+            parts.append(f"<span style='color:{color}'>{lates} ret</span>")
+        self._metrics_label.setText(" · ".join(parts) if parts else "")
+        self._metrics_label.setStyleSheet(f"font-size: {s(10)}px;")

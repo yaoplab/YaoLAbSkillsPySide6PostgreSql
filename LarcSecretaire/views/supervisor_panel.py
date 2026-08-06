@@ -1,6 +1,7 @@
 from larccommon.design_system import ds
 from larccommon.l10n import _
 from larccommon.widgets import PHI_MEDIUM, StudentCard
+from larccommon.widgets.skeleton import M3Skeleton
 from LarcSecretaire.common.audit import audit
 from LarcSecretaire.common.database import db
 from LarcSecretaire.common.logger import log
@@ -22,11 +23,13 @@ from phibuilder.widgets import (
 from phibuilder.widgets.button import ButtonVariant
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
 from larccommon.safe_slot import safe_slot
+from PySide6.QtWidgets import (
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QDialog,
+    QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QMessageBox,
@@ -212,7 +215,7 @@ class EventDialog(QDialog):
         except Exception as e:
             log(f"EventDialog._load_subjects: {e}")
 
-    @safe_slot("Unknown._on_subject_changed")
+    @safe_slot("EventDialog._on_subject_changed")
     def _on_subject_changed(self, idx):
         idx_data = self._subject_combo.currentData()
         if idx_data is None:
@@ -231,7 +234,7 @@ class EventDialog(QDialog):
             else:
                 self._teacher_label.setText("")
 
-    @safe_slot("Unknown._validate")
+    @safe_slot("EventDialog._validate")
     def _validate(self):
         if not self._selected_type:
             QMessageBox.warning(self, _("common.dialog.error_title"), _("supervisor.error.no_type"))
@@ -335,10 +338,19 @@ class SupervisorPanel(QWidget):
         self._cards_grid = QGridLayout(self._cards_widget)
         self._cards_grid.setSpacing(ds.space_xs)
         scroll.setWidget(self._cards_widget)
-        self._stack.addWidget(scroll)
 
-        # Page 1: student detail
-        self._stack.addWidget(self._build_detail())
+        # Skeleton loading : 3 pages dans le stack
+        self._loading_page = QWidget()
+        lp_layout = QVBoxLayout(self._loading_page)
+        lp_layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+        lp_layout.setAlignment(Qt.AlignCenter)
+        self._loading_skeleton = M3Skeleton.table(self._loading_page, rows=5, cols=4)
+        self._loading_skeleton.set_label(_("common.label.loading"))
+        lp_layout.addWidget(self._loading_skeleton)
+
+        self._stack.addWidget(scroll)                  # 0 = grille de cartes
+        self._stack.addWidget(self._loading_page)       # 1 = skeleton loading
+        self._stack.addWidget(self._build_detail())     # 2 = detail eleve
         self._stack.setCurrentIndex(0)
         layout.addWidget(self._stack, 1)
 
@@ -422,8 +434,16 @@ class SupervisorPanel(QWidget):
         self._stack.setCurrentIndex(0)
         self._load_students()
         self._load_presence()
+        # Rafraichir les photos (si changees depuis le formulaire)
+        for card in self._cards:
+            card.refresh_photo()
 
-    @safe_slot("Unknown._on_add_student")
+    def refresh_photos(self):
+        """Rafraichit les photos de toutes les cartes (appele depuis main_window)."""
+        for card in self._cards:
+            card.refresh_photo()
+
+    @safe_slot("SupervisorPanel._on_add_student")
     def _on_add_student(self):
         """Ouvre le formulaire de création d'élève pour cette classe."""
         from LarcSecretaire.views.student_form import StudentCreateDialog
@@ -435,27 +455,40 @@ class SupervisorPanel(QWidget):
             self._load_presence()
 
     def _load_students(self):
-        conn = db.server_conn
-        if not conn:
+        # Garde anti-recursion
+        if getattr(self, "_loading_students", False):
             return
+        self._loading_students = True
         try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT s.aecuser_ptr_id, aec.last_name, aec.first_name
-                FROM larcauth_student s
-                JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
-                WHERE s.s_classroom_id = %s AND s.enabled = TRUE
-                ORDER BY aec.last_name, aec.first_name
-            """,
-                (self._current_class_id,),
-            )
-            self._students = [{"id": r[0], "last_name": r[1], "first_name": r[2]} for r in cur.fetchall()]
-        except Exception as e:
-            log(f"SupervisorPanel._load_students: {e}")
-            self._students = []
-
-        self._rebuild_cards()
+            self._stack.setCurrentIndex(1)  # skeleton
+            self._loading_skeleton.start()
+            QApplication.processEvents()
+            conn = db.server_conn
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT s.aecuser_ptr_id, aec.last_name, aec.first_name,
+                           COALESCE(s.validation, '{}'::jsonb) AS validation
+                    FROM larcauth_student s
+                    JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
+                    WHERE s.s_classroom_id = %s AND s.enabled = TRUE
+                    ORDER BY aec.last_name, aec.first_name
+                """,
+                    (self._current_class_id,),
+                )
+                self._students = [{"id": r[0], "last_name": r[1], "first_name": r[2],
+                                  "validation": r[3]} for r in cur.fetchall()]
+            except Exception as e:
+                log(f"SupervisorPanel._load_students: {e}")
+                self._students = []
+            self._rebuild_cards()
+        finally:
+            self._loading_students = False
+            self._loading_skeleton.stop()
+            self._stack.setCurrentIndex(0)
 
     def _rebuild_cards(self):
         for i in reversed(range(self._cards_grid.count())):
@@ -466,8 +499,14 @@ class SupervisorPanel(QWidget):
         cfg = self._card_sizes.get(self._card_size, PHI_MEDIUM)
         card_w = cfg.card_w
         cols = max(1, self.width() // (card_w + 10))
+        import json as _json
         for i, s in enumerate(self._students):
             card = StudentCard(s["id"], s["last_name"], s["first_name"], cfg)
+            card.set_role(StudentCard._ROLE_SECRETARY)
+            val = s.get("validation")
+            if isinstance(val, str):
+                val = _json.loads(val) if val else {}
+            card.set_validation(val)
             card.clicked.connect(self._on_student_clicked)
             self._cards_grid.addWidget(card, i // cols, i % cols)
             self._cards.append(card)
@@ -510,15 +549,12 @@ class SupervisorPanel(QWidget):
             for r in cur.fetchall():
                 pmap[r[0]] = r[1]
             for card in self._cards:
-                st = pmap.get(card._sid, "UNKNOWN")
-                if st == "PRESENT":
-                    card.set_status(_("supervisor.status_present"), _p.success)
-                    card.set_absent(False)
-                elif st == "ABSENT":
+                st = pmap.get(card._sid, "PRESENT")
+                if st == "ABSENT":
                     card.set_status(_("supervisor.status_absent"), _p.error)
                     card.set_absent(True)
                 else:
-                    card.set_status(_("supervisor.status_unknown"), _p.inactive)
+                    card.set_status(_("supervisor.status_present"), _p.success)
                     card.set_absent(False)
         except Exception as e:
             log(f"SupervisorPanel._load_presence: {e}")
@@ -542,7 +578,6 @@ class SupervisorPanel(QWidget):
             if btn.toolTip() and btn.toolTip().lower() in self._card_sizes:
                 btn.setChecked(btn.toolTip().lower() == key)
 
-    @safe_slot("Unknown._on_student_clicked")
     def _on_student_clicked(self, student_id: int):
         s = next((s for s in self._students if s["id"] == student_id), None)
         if not s:
@@ -618,7 +653,6 @@ class SupervisorPanel(QWidget):
         except Exception as e:
             log(f"SupervisorPanel._load_events: {e}")
 
-    @safe_slot("Unknown._on_add_event")
     def _on_add_event(self):
         name = self._sd_name.text()
         sid = next((s["id"] for s in self._students if f"{s['last_name']} {s['first_name']}" == name), 0)
@@ -671,7 +705,6 @@ class SupervisorPanel(QWidget):
                 log(f"SupervisorPanel._on_add_event: {e}")
                 QMessageBox.critical(self, _("common.dialog.error_title"), str(e))
 
-    @safe_slot("Unknown._on_class_list")
     def _on_class_list(self):
         if not hasattr(self, "_current_class_id") or not self._current_class_id:
             return
@@ -691,31 +724,49 @@ class ClassListDialog(QDialog):
         super().__init__(parent)
         self._class_id = class_id
         self._class_label = class_label
+        self._rows: list[tuple] = []
         self.setWindowTitle(_("supervisor.list_title").format(label=class_label))
-        # 610×377 = paire dorée (610 = sidebar_width(233) + golden_width(233)=377 ; 377 = golden_width(233))
-        self.setMinimumSize(ds.golden_width(ds.sidebar_width) + ds.sidebar_width, ds.golden_width(ds.sidebar_width))
+        _h = ds.golden_width(ds.sidebar_width)
+        self.setMinimumSize(ds.golden_width(_h) + _h, _h)
         self._init_ui()
         self._load()
 
     def _init_ui(self):
-        p = theme_manager.palette
+        p = ds.p
         layout = QVBoxLayout(self)
-        layout.setSpacing(theme_manager.design.spacing)
+        layout.setSpacing(ds.space_md)
+        layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
 
-        hdr = M3Label(_("supervisor.list_header").format(name=self._class_label), style="title_small")
-        layout.addWidget(hdr)
+        hdr = QHBoxLayout()
+        title = M3Label(_("supervisor.list_header").format(name=self._class_label), style="title_small")
+        hdr.addWidget(title)
+        hdr.addStretch()
+        self._count_label = M3Label("", style="label_small")
+        self._count_label.setStyleSheet(f"color: {p.text_soft}; font-weight: bold;")
+        hdr.addWidget(self._count_label)
+        layout.addLayout(hdr)
 
         self._table = M3TableWidget()
-        self._table.set_headers(["", _("supervisor.list_table_num"), _("supervisor.list_table_last_name"), _("supervisor.list_table_first_name")])
-        self._table.horizontalHeader().setStretchLastSection(True)
-        self._table.setColumnWidth(0, 34)
-        self._table.setColumnWidth(1, 36)
-        self._table.setColumnWidth(2, 180)
+        self._table.set_headers([
+            _("supervisor.list_table_num"), _("supervisor.list_table_last_name"),
+            _("supervisor.list_table_first_name"),
+        ])
+        self._table.setColumnWidth(0, 50)
+        hh = self._table.horizontalHeader()
+        hh.setSectionResizeMode(1, M3HeaderView.Stretch)
+        hh.setSectionResizeMode(2, M3HeaderView.Stretch)
         self._table.verticalHeader().hide()
         self._table.setSelectionMode(M3TableWidget.NoSelection)
-        layout.addWidget(self._table)
+        self._table.setAlternatingRowColors(True)
+        self._table.setStyleSheet(ds.table_qss())
+        self._table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
+        layout.addWidget(self._table, 1)
 
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(ds.space_sm)
+        pdf_btn = M3Button(_("supervisor.pdf_button"), variant=ButtonVariant.FILLED)
+        pdf_btn.clicked.connect(self._export_pdf)
+        btn_row.addWidget(pdf_btn)
         btn_row.addStretch()
         close_btn = M3Button(_("supervisor.close_button"), variant=ButtonVariant.OUTLINED)
         close_btn.clicked.connect(self.accept)
@@ -729,25 +780,96 @@ class ClassListDialog(QDialog):
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT s.id, a.last_name, a.first_name "
-                "FROM larcauth_student s "
-                "JOIN larcauth_aecuser a ON a.id = s.id "
-                "WHERE s.s_classroom_id = %s AND s.enabled = TRUE "
-                "ORDER BY a.last_name, a.first_name",
+                """
+                SELECT a.last_name, a.first_name
+                FROM larcauth_student s
+                JOIN larcauth_aecuser a ON a.id = s.aecuser_ptr_id
+                WHERE s.s_classroom_id = %s AND s.enabled = TRUE
+                ORDER BY a.last_name, a.first_name
+            """,
                 (self._class_id,),
             )
-            rows = cur.fetchall()
-            self._table.setRowCount(len(rows))
-            for i, (sid, ln, fn) in enumerate(rows):
-                cb = QCheckBox()
-                cw = QWidget()
-                cl = QHBoxLayout(cw)
-                cl.setContentsMargins(ds.space_xxs, 0, 0, 0)
-                cl.addWidget(cb)
-                self._table.setCellWidget(i, 0, cw)
-                _, slot = divmod(sid, 100)
-                self._table.setItem(i, 1, QTableWidgetItem(str(slot).zfill(2)))
-                self._table.setItem(i, 2, QTableWidgetItem(ln or ""))
-                self._table.setItem(i, 3, QTableWidgetItem(fn or ""))
+            self._rows = [(ln or "", fn or "") for ln, fn in cur.fetchall()]
+            self._table.setRowCount(len(self._rows))
+            for i, (ln, fn) in enumerate(self._rows):
+                self._table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+                self._table.setItem(i, 1, QTableWidgetItem(ln.upper()))
+                self._table.setItem(i, 2, QTableWidgetItem(fn))
+            self._count_label.setText(_("supervisor.list_count").format(n=len(self._rows)))
         except Exception as e:
             log(f"ClassListDialog._load: {e}")
+
+    def _export_pdf(self):
+        """Genere un PDF A4 avec en-tete logo, tableau des eleves et effectif."""
+        import os as _os
+        from PySide6.QtCore import QMarginsF
+        from PySide6.QtGui import QTextDocument, QFont
+        from PySide6.QtPrintSupport import QPrinter
+
+        t = _  # eviter ombrage Python de _ dans les f-strings
+
+        logo_path = _os.path.join(_os.path.dirname(_os.path.dirname(__file__)), "img", "logoAEC.png")
+        if not _os.path.exists(logo_path):
+            logo_path = ""
+
+        # Construire les lignes HTML du tableau
+        rows_html = ""
+        for i, (ln, fn) in enumerate(self._rows):
+            row_bg = "#F5F7FA" if i % 2 == 0 else "#FFFFFF"
+            rows_html += (
+                f'<tr style="background:{row_bg}">'
+                f'<td style="text-align:center;padding:4px 8px;">{i+1}</td>'
+                f'<td style="padding:4px 8px;">{ln.upper()}</td>'
+                f'<td style="padding:4px 8px;">{fn}</td>'
+                f'</tr>\n')
+
+        total = len(self._rows)
+        logo_tag = f'<img src="{logo_path}" width="60">' if logo_path else ""
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body {{ font-family: 'Roboto', 'Segoe UI', sans-serif; font-size: 11pt; margin: 40px; }}
+  .header {{ display: flex; align-items: center; margin-bottom: 20px; }}
+  .header img {{ margin-right: 16px; }}
+  .header .title {{ font-size: 14pt; font-weight: bold; color: #1B1B1F; }}
+  .header .subtitle {{ font-size: 10pt; color: #546E7A; }}
+  table {{ width: 100%; border-collapse: collapse; margin-bottom: 16px; }}
+  th {{ background: #1565C0; color: #FFFFFF; font-weight: bold; padding: 8px; text-align: left; }}
+  th:first-child {{ text-align: center; width: 50px; }}
+  td {{ border-bottom: 1px solid #E0E0E0; }}
+  .footer {{ font-size: 10pt; color: #546E7A; text-align: right; margin-top: 12px; }}
+</style></head><body>
+<div class="header">
+  {logo_tag}
+  <div>
+    <div class="title">{t("supervisor.list_header").format(name=self._class_label)}</div>
+    <div class="subtitle">{t("supervisor.pdf_generated_on")} — {t("supervisor.list_count").format(n=total)}</div>
+  </div>
+</div>
+<table>
+  <tr>
+    <th>N°</th>
+    <th>{t("supervisor.list_table_last_name")}</th>
+    <th>{t("supervisor.list_table_first_name")}</th>
+  </tr>
+  {rows_html}
+</table>
+<div class="footer">{t("supervisor.list_count").format(n=total)}</div>
+</body></html>"""
+
+        doc = QTextDocument()
+        doc.setDefaultFont(QFont("Roboto", 10))
+        doc.setHtml(html)
+
+        save_path, _ = QFileDialog.getSaveFileName(
+            self, _("supervisor.pdf_save_title"),
+            f"Liste_{self._class_label.replace(' ', '_')}.pdf",
+            "PDF (*.pdf)")
+        if not save_path:
+            return
+
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printer.setOutputFileName(save_path)
+        printer.setPageSize(QPrinter.A4)
+        printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPrinter.Millimeter)
+        doc.print_(printer)

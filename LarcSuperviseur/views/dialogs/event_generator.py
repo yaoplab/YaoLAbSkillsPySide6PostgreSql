@@ -1,5 +1,6 @@
 from larccommon.design_system import ds
 from larccommon.l10n import _
+from larccommon.logger import log
 from larccommon.safe_slot import safe_slot
 from larccommon.widgets.themed_widget import ThemedDialog
 from phibuilder.widgets import M3Button, M3Card, M3Label, M3TextField
@@ -389,6 +390,7 @@ class EventGenerator(ThemedDialog):
             return
 
         p = theme_manager.palette
+        s = theme_manager.font_size
 
         for i, label in enumerate(self._path):
             if i > 0:

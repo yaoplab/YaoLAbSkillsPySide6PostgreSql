@@ -353,7 +353,7 @@ class LoginWindow(QWidget):
                 r = cur.fetchone()
                 if r:
                     user_lang_id = int(r[0])
-            except Exception:
+            except Exception as e:
                 pass  # fk_language non critique, defaut fr
             user_lang = "en" if user_lang_id == 1 else "fr"
             lang = os.environ.get("LARC_LANG", user_lang)
@@ -378,9 +378,8 @@ class LoginWindow(QWidget):
                 if r:
                     session.term_id = int(r[0])
                     session.term_label = r[1]
-            except Exception:
-                pass
-
+            except Exception as e:
+                log(f"set_term non critique: {e}")
             log(f"Connexion Intranet : {session.full_name} ({role.value})")
             trace(" _on_intranet: session OK, appel _open_main_window")
             self._open_main_window()
@@ -449,12 +448,17 @@ class LoginWindow(QWidget):
             preloader.progress.connect(lambda cur, total, sid: progress.setValue(cur))
             preloader.done.connect(lambda loaded, failed: progress.close())
             progress.canceled.connect(preloader.cancel)
-            preloader.finished.connect(lambda: self._do_open_main_window(MainWindow))
+            self._target_mw = MainWindow
+            preloader.finished.connect(self._on_preloader_done)
             preloader.finished.connect(preloader.deleteLater)
             preloader.start()
             self._preloader = preloader
         else:
             self._do_open_main_window(MainWindow)
+
+    @safe_slot("LoginWindow.on_preloader_done")
+    def _on_preloader_done(self):
+        self._do_open_main_window(self._target_mw)
 
     def _do_open_main_window(self, MainWindow):
         self.main = MainWindow()

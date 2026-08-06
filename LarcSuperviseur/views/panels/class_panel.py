@@ -87,7 +87,7 @@ class ClassPanel(QWidget):
             self._grid_layout.addWidget(card, idx // cols, idx % cols, Qt.AlignCenter)
         remaining = len(cards) % cols
         if remaining:
-            for _ in range(cols - remaining):
+            for _unused in range(cols - remaining):
                 sp = QWidget()
                 sp.setFixedSize(cfg.card_w, cfg.card_h)
                 self._grid_layout.addWidget(

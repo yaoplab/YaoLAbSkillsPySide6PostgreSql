@@ -60,10 +60,7 @@ import sys
 from pathlib import Path
 
 # Force UTF-8 pour eviter UnicodeEncodeError sous Windows (cp1252)
-if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-if hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+# — appliqué dans main() uniquement pour éviter un double wrapping
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────

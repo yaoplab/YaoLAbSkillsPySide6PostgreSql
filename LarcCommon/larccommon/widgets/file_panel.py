@@ -126,7 +126,7 @@ class FilePanel(QWidget):
         dlg = FileViewer(path, self)
         dlg.exec()
 
-    @safe_slot("Unknown._open_folder")
+    @safe_slot("FilePanel._open_folder")
     def _open_folder(self):
         if not self._directory:
             return

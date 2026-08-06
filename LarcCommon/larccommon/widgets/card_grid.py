@@ -18,9 +18,16 @@ def fill_cards_grid(layout, scroll_widget, students, event_stats, on_student_cli
     spacing = cfg.spacing
     cols = max(1, (avail_w + spacing) // (card_w + spacing)) if avail_w > 100 else 3
 
+    import json as _json
     for idx, s in enumerate(students):
         sid = s['id']
         card = StudentCard(sid, s['last_name'], s['first_name'], cfg)
+        card.set_role(StudentCard._ROLE_SECRETARY)
+        # Validation D/M/P/E
+        val = s.get("validation")
+        if isinstance(val, str):
+            val = _json.loads(val) if val else {}
+        card.set_validation(val)
         stats = event_stats.get(sid, {'exit': 0, 'presence': 'Présent'})
         card.set_exit_count(stats['exit'])
         is_absent = stats['presence'] == 'Absent'

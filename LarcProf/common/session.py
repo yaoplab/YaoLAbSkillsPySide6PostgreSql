@@ -1,90 +1,90 @@
+"""Pont de session LarcProf → larccommon.
+
+Ré-exporte les types et le singleton session depuis larccommon,
+avec les extensions spécifiques à LarcProf (load_role_flags, role_display).
+"""
 from __future__ import annotations
+from types import MethodType
 
-import os
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional
-
-
-class UserRole(Enum):
-    PROF = "PROF"
-    COORD = "COORD"
-    SECR = "SECR"
-    ADMIN = "ADMIN"
-    SUPERVISEUR = "SUPERVISEUR"  # alias LarcCommon
+from larccommon.session import (
+    UserRole,
+    ConnMode,
+    AuthResult,
+    Session,
+    session,
+)
 
 
-class ConnMode(Enum):
-    INTRANET = "Intranet"
-    CLOUD = "Cloud"
-    OFFLINE = "Hors connexion"
-    NEW_INSTANCE = "Nouvelle instance"
+def load_role_flags(self) -> dict[str, bool]:
+    """Charge les flags de rôle depuis PostgreSQL/SQLite.
+
+    Retourne un dict: {'Professeur': True, 'Coordinateur': False, ...}
+    """
+    from .database import db
+    flags = {}
+    conn = db.server_conn
+    if conn is not None:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT type_teacher, type_coordonator, type_supervisor, "
+                    "type_secretary, type_director "
+                    "FROM larcauth_aecuser WHERE id = %s",
+                    (self.user_id,)
+                )
+                row = cur.fetchone()
+                if row:
+                    flags = {
+                        'Professeur': bool(row[0]),
+                        'Coordinateur': bool(row[1]),
+                        'Superviseur': bool(row[2]),
+                        'Secretaire': bool(row[3]),
+                        'Directeur': bool(row[4]),
+                    }
+                    self.role_flags = flags
+                    return flags
+        except Exception:
+            pass
+    sqlite = db.local_conn
+    if sqlite is not None:
+        try:
+            row = sqlite.execute(
+                "SELECT type_teacher, type_coordonator, type_supervisor, "
+                "type_secretary, type_director "
+                "FROM larcauth_aecuser WHERE id = ?",
+                (self.user_id,)
+            ).fetchone()
+            if row:
+                flags = {
+                    'Professeur': bool(row[0]),
+                    'Coordinateur': bool(row[1]),
+                    'Superviseur': bool(row[2]),
+                    'Secretaire': bool(row[3]),
+                    'Directeur': bool(row[4]),
+                }
+                self.role_flags = flags
+                return flags
+        except Exception:
+            pass
+    return flags
 
 
-@dataclass
-class AuthResult:
-    user_id: int = 0
-    email: str = ""
-    full_name: str = ""
-    role: UserRole = field(default_factory=lambda: UserRole.ADMIN)
-    term_id: int = 0
-    term_label: str = ""
+def _get_active_role_labels(self) -> list[str]:
+    """Retourne la liste des rôles actifs pour affichage."""
+    if not self.role_flags:
+        load_role_flags(self)
+    return [label for label, active in self.role_flags.items() if active]
 
 
-class Session:
-    def __init__(self):
-        self.user_id = 0
-        self.email = ""
-        self.full_name = ""
-        self.role = UserRole.ADMIN
-        self.conn_mode: Optional[ConnMode] = None
-        self.is_authenticated = False
-        self.theme_pref: str = "material_light"
-        self.card_theme: str = "medium"
-        self.instance_dir = os.path.normpath(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-        )
-        # Champs synchronisés
-        self._term_id = 0
-        self._term_label = ""
-        self._active_term_id = 0
-        self._active_term_label = ""
-
-    @property
-    def term_id(self) -> int:
-        return self._term_id
-
-    @term_id.setter
-    def term_id(self, v: int):
-        self._term_id = v
-        self._active_term_id = v
-
-    @property
-    def term_label(self) -> str:
-        return self._term_label
-
-    @term_label.setter
-    def term_label(self, v: str):
-        self._term_label = v
-        self._active_term_label = v
-
-    @property
-    def active_term_id(self) -> int:
-        return self._active_term_id or self._term_id
-
-    @active_term_id.setter
-    def active_term_id(self, v: int):
-        self._active_term_id = v
-        self._term_id = v
-
-    @property
-    def active_term_label(self) -> str:
-        return self._active_term_label or self._term_label
-
-    @active_term_label.setter
-    def active_term_label(self, v: str):
-        self._active_term_label = v
-        self._term_label = v
+def _get_role_display(self) -> str:
+    """Retourne les rôles actifs séparés par ' | ' pour affichage."""
+    labels = _get_active_role_labels(self)
+    return ' | '.join(labels) if labels else self.role.value
 
 
-session = Session()
+# Attacher les méthodes au singleton session
+session.load_role_flags = MethodType(load_role_flags, session)
+
+# Injecter les propriétés via la classe (un seul singleton, pas d'impact)
+Session.active_role_labels = property(_get_active_role_labels)
+Session.role_display = property(_get_role_display)

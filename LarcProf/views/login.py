@@ -534,13 +534,11 @@ class LoginWindow(QMainWindow):
         super().hideEvent(event)
         self._network_timer.stop()
 
-    @safe_slot("Unknown._check_network")
     def _check_network(self) -> None:
         worker = _Worker(lambda: (True, *detect_network(), ""), parent=self)
         worker.done.connect(self._on_net_detected)
         worker.start()
 
-    @safe_slot("Unknown._on_net_detected")
     def _on_net_detected(self, result) -> None:
         ok, intra_ok, internet_ok, _ignored = result
         if not ok:
@@ -599,14 +597,12 @@ class LoginWindow(QMainWindow):
             f"font-weight: {'bold' if cloud else 'normal'};"
         )
 
-    @safe_slot("Unknown._on_change_password")
     def _on_change_password(self) -> None:
         from views.password import ChangePasswordDialog
 
         dlg = ChangePasswordDialog(self)
         dlg.exec()
 
-    @safe_slot("Unknown._on_change_pin")
     def _on_change_pin(self) -> None:
         from views.password import ChangePinDialog
 
@@ -616,7 +612,6 @@ class LoginWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Auth handlers (inchangés)
     # ------------------------------------------------------------------
-    @safe_slot("Unknown._on_intranet")
     def _on_intranet(self) -> None:
         email = self._edt_i_email.text().strip()
         pwd = self._edt_i_pass.text()
@@ -637,7 +632,6 @@ class LoginWindow(QMainWindow):
             return (False, AuthResult(), "Connexion à l'intranet impossible (vérifier le réseau).")
         return AuthManager.auth_intranet(email, pwd)
 
-    @safe_slot("Unknown._on_cloud")
     def _on_cloud(self) -> None:
         self._hide_error()
         self._set_busy(True)
@@ -687,7 +681,6 @@ class LoginWindow(QMainWindow):
             return False
         return True
 
-    @safe_slot("Unknown._on_pin")
     def _on_pin(self) -> None:
         email = self._edt_p_email.text().strip()
         pin = self._edt_p_pin.text()
@@ -699,15 +692,71 @@ class LoginWindow(QMainWindow):
             return
         if not self._check_email_module(email):
             return
+
+        # Rate limiting PIN : 5 tentatives max, puis verrouillage 15 min
+        conn = db.local_conn
+        if conn:
+            row = conn.execute(
+                "SELECT pin_attempts, pin_locked_until FROM session_cache "
+                "WHERE LOWER(email) = LOWER(?)",
+                (email,)
+            ).fetchone()
+            if row:
+                locked_until = row['pin_locked_until']
+                if locked_until:
+                    from datetime import datetime
+                    if datetime.now().isoformat() < locked_until:
+                        self._show_error(
+                            "Trop de tentatives. Reessayez dans 15 minutes."
+                        )
+                        return
+
         self._hide_error()
         self._set_busy(True)
         self._worker = _Worker(AuthManager.auth_pin, email, pin, parent=self)
-        self._worker.done.connect(lambda r: self._on_auth_done(r, ConnMode.OFFLINE))
+        self._worker.done.connect(lambda r: self._on_auth_done(r, ConnMode.OFFLINE, email))
         self._worker.start()
 
-    def _on_auth_done(self, result, mode: ConnMode) -> None:
+    def _on_auth_done(self, result, mode: ConnMode, email: str = '') -> None:
         self._set_busy(False)
         ok, res, err = result
+
+        # PIN rate limiting : suivre les tentatives echouees
+        if mode == ConnMode.OFFLINE and email:
+            conn = db.local_conn
+            if conn and not ok:
+                from datetime import datetime, timedelta
+                row = conn.execute(
+                    "SELECT pin_attempts FROM session_cache WHERE LOWER(email) = LOWER(?)",
+                    (email,)
+                ).fetchone()
+                if row:
+                    attempts = (row['pin_attempts'] or 0) + 1
+                    if attempts >= 5:
+                        locked_until = (datetime.now() + timedelta(minutes=15)).isoformat()
+                        conn.execute(
+                            "UPDATE session_cache SET pin_attempts = ?, pin_locked_until = ? "
+                            "WHERE LOWER(email) = LOWER(?)",
+                            (attempts, locked_until, email)
+                        )
+                        conn.commit()
+                        self._show_error("Trop de tentatives. Compte verrouille 15 minutes.")
+                        return
+                    else:
+                        conn.execute(
+                            "UPDATE session_cache SET pin_attempts = ? "
+                            "WHERE LOWER(email) = LOWER(?)",
+                            (attempts, email)
+                        )
+                        conn.commit()
+            elif conn and ok:
+                conn.execute(
+                    "UPDATE session_cache SET pin_attempts = 0, pin_locked_until = NULL "
+                    "WHERE LOWER(email) = LOWER(?)",
+                    (email,)
+                )
+                conn.commit()
+
         if not ok:
             self._show_error(err or _("login.error.auth_failed"))
             return
@@ -872,6 +921,8 @@ class LoginWindow(QMainWindow):
         session.active_term_label = res.term_label
         session.conn_mode = mode
         session.is_authenticated = True
+        # Charger tous les flags de roles depuis le serveur
+        session.load_role_flags()
 
         if mode == ConnMode.INTRANET:
             self._update_indicators(True, False)
@@ -918,13 +969,11 @@ class LoginWindow(QMainWindow):
     # ------------------------------------------------------------------
     # New instance (inchangé)
     # ------------------------------------------------------------------
-    @safe_slot("Unknown._browse_dest")
     def _browse_dest(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Choisir le dossier parent")
         if folder:
             self._edt_n_dest.setText(folder)
 
-    @safe_slot("Unknown._on_create")
     def _on_create(self) -> None:
         self._hide_error()
         email = self._edt_n_email.text().strip()
@@ -1015,24 +1064,12 @@ class LoginWindow(QMainWindow):
                     shutil.copy2(s, d)
             dest_cfg = os.path.join(dest, "config.ini")
             if not os.path.exists(dest_cfg):
-                self._log(
-                    "config.ini introuvable dans la source, création d'un fichier par défaut."
-                )
-                with open(dest_cfg, "w", encoding="utf-8") as f:
-                    f.write("""[IntranetDatabase]
-Host = 127.0.0.1
-Port = 5432
-DB = NewLarcDB
-User = postgres
-Pass = postgres
-
-[SupabaseDatabase]
-Host = db.xxxxxxxxxxxx.supabase.co
-Port = 5432
-DB = postgres
-User = postgres
-Pass = votre_mot_de_passe_supabase
-""")
+                self._log("config.ini introuvable dans la source, copie du config.ini source.")
+                src_cfg = os.path.normpath(os.path.join(src, "config.ini"))
+                if os.path.exists(src_cfg):
+                    shutil.copy2(src_cfg, dest_cfg)
+                else:
+                    self._log("ATTENTION : aucun config.ini source trouve.")
                 self._log(f"config.ini par défaut créé : {dest_cfg}")
             src_db = os.path.normpath(os.path.join(src, "elarc.db"))
             if os.path.exists(src_db):

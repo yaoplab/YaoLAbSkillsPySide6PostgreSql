@@ -261,7 +261,7 @@ class LoginWindow(QWidget):
                 self._apply_tab_visibility()
         return super().eventFilter(obj, event)
 
-    @safe_slot("Unknown._on_force_toggle")
+    @safe_slot("LoginWindow._on_force_toggle")
     def _on_force_toggle(self, checked: bool):
         self._tabs_forced = checked
         self._apply_tab_visibility()
@@ -346,7 +346,7 @@ class LoginWindow(QWidget):
         layout.addWidget(info2)
         return w
 
-    @safe_slot("Unknown._on_intranet")
+    @safe_slot("LoginWindow._on_intranet")
     def _on_intranet(self):
         trace(f"_on_intranet: START")
         email = self._edt_i_email.text().strip()
@@ -369,7 +369,7 @@ class LoginWindow(QWidget):
             self._worker.start()
             return
 
-    @safe_slot("Unknown._on_cloud")
+    @safe_slot("LoginWindow._on_cloud")
     def _on_cloud(self):
         try:
             self._check_rate_limit("cloud")
@@ -385,13 +385,13 @@ class LoginWindow(QWidget):
         self._worker.done.connect(self._on_cloud_done)
         self._worker.start()
 
-    @safe_slot("Unknown._on_cloud_done")
-    def _on_cloud_done(self, result, rate_key="cloud"):
+    @safe_slot("LoginWindow._on_cloud_done")
+    def _on_cloud_done(self, result, mode=None, rate_key="cloud"):
         self._set_busy(False)
         ok, res, err = result
         if not ok:
             self._record_failure(rate_key)
-            self._show_error(err or "Authentification \u00e9chou\u00e9e.")
+            self._show_error(err or "Authentification echouee.")
             return
         log(f"Connexion : {getattr(res, 'full_name', '?')}")
         self._on_success()
@@ -486,7 +486,7 @@ class LoginWindow(QWidget):
                 f"color: {p.text_disabled}; font-weight: bold; font-size: {theme_manager.font_size(13)}px;"
             )
 
-    @safe_slot("Unknown._update_network_status")
+    @safe_slot("LoginWindow._update_network_status")
     def _update_network_status(self):
         self._net_status = detect_network()
         self._apply_tab_visibility()

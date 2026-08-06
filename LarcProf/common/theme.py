@@ -60,6 +60,10 @@ class ThemeManagerWrapper:
     def active_name(self):
         return self._original.active_name
 
+    @property
+    def image(self):
+        return self._original.image
+
     def set_active(self, name: str) -> bool:
         return self._original.set_active(name)
 

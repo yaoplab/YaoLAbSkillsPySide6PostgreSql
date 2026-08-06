@@ -70,6 +70,23 @@ class Database:
             lc_db._cloud = self._cloud
             lc_db._server_mode = LcDBMode.CLOUD
 
+    def sync_from_larccommon(self) -> None:
+        """Copie les connexions depuis larccommon.database.db vers ce Database.
+
+        Utilisé par LarcHub quand il a déjà établi les connexions PostgreSQL.
+        LarcProf hérite des connexions existantes plutôt que de reconnecter.
+        """
+        from larccommon.database import db as lc_db, DBMode as LcDBMode
+        lc_mode = lc_db.server_mode
+        if lc_mode == LcDBMode.INTRANET and lc_db._intranet is not None:
+            self._intranet = lc_db._intranet
+            self._server_mode = DBMode.INTRANET
+            self._mode = DBMode.INTRANET
+        elif lc_mode == LcDBMode.CLOUD and lc_db._cloud is not None:
+            self._cloud = lc_db._cloud
+            self._server_mode = DBMode.CLOUD
+            self._mode = DBMode.CLOUD
+
     def connect_intranet(self) -> bool:
         if not _PG_OK:
             _log("connect_intranet: psycopg2 non installé")

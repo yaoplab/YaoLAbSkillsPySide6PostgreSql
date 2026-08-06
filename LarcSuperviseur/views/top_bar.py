@@ -113,9 +113,10 @@ class TopBar(QFrame):
         self._profile_btn.setCursor(Qt.PointingHandCursor)
         self._profile_btn.setStyleSheet(
             f"QPushButton {{ background: {p.primary}; color: {p.on_primary}; "
-            f"font-weight: bold; font-size: {theme_manager.font_size(13)}px; "
-            f"border: none; border-radius: 17px; }}"
+            f"font-weight: bold; font-size: {theme_manager.font_size(12)}px; "
+            f"border: none; border-radius: 17px; text-align: center; padding: 0px; }}"
             f"QPushButton:hover {{ background: {p.active}; }}"
+            f"QPushButton::menu-indicator {{ image: none; width: 0px; }}"
         )
         self.update_profile()
         self._profile_menu = M3Menu(self)
@@ -323,8 +324,10 @@ class TopBar(QFrame):
         self._theme_btn.setIcon(self._theme_icon())
         self._profile_btn.setStyleSheet(
             f"QPushButton {{ background: {p.primary}; color: {p.on_primary}; "
-            f"font-weight: bold; font-size: {s(13)}px; border: none; border-radius: 17px; }}"
+            f"font-weight: bold; font-size: {s(12)}px; border: none; border-radius: 17px; "
+            f"text-align: center; padding: 0px; }}"
             f"QPushButton:hover {{ background: {p.active}; }}"
+            f"QPushButton::menu-indicator {{ image: none; width: 0px; }}"
         )
         self._date_label.setStyleSheet(
             f"font-size: {s(21)}px; font-weight: bold; color: {p.text_strong};"

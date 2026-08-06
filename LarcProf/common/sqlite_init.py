@@ -13,14 +13,16 @@ from .logger import log as _log
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS session_cache (
-    user_id    INTEGER PRIMARY KEY,
-    email      TEXT    NOT NULL,
-    full_name  TEXT    NOT NULL,
-    role       TEXT    NOT NULL,
-    term_id    INTEGER DEFAULT 0,
-    term_label TEXT    DEFAULT '',
-    pin_hash   TEXT,
-    updated_at TEXT    DEFAULT (datetime('now'))
+    user_id         INTEGER PRIMARY KEY,
+    email           TEXT    NOT NULL,
+    full_name       TEXT    NOT NULL,
+    role            TEXT    NOT NULL,
+    term_id         INTEGER DEFAULT 0,
+    term_label      TEXT    DEFAULT '',
+    pin_hash        TEXT,
+    pin_attempts    INTEGER DEFAULT 0,
+    pin_locked_until TEXT,
+    updated_at      TEXT    DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS sync_cursor (
@@ -298,6 +300,36 @@ CREATE TABLE IF NOT EXISTS larcauth_learner_has_termothersubject_ref (
     last_modified_at TEXT,
     sync_revision TEXT
 );
+
+CREATE TABLE IF NOT EXISTS student_event (
+    event_id INTEGER PRIMARY KEY,
+    student_id INTEGER NOT NULL,
+    agenda_day_id INTEGER,
+    event_type TEXT NOT NULL,
+    event_at TEXT NOT NULL,
+    note TEXT,
+    source TEXT NOT NULL DEFAULT 'intranet',
+    created_by INTEGER NOT NULL,
+    validated_by INTEGER,
+    created_at TEXT,
+    lieu_label TEXT,
+    subject_label TEXT
+);
+
+CREATE TABLE IF NOT EXISTS student_event_ref (
+    event_id INTEGER PRIMARY KEY,
+    student_id INTEGER NOT NULL,
+    agenda_day_id INTEGER,
+    event_type TEXT NOT NULL,
+    event_at TEXT NOT NULL,
+    note TEXT,
+    source TEXT NOT NULL DEFAULT 'intranet',
+    created_by INTEGER NOT NULL,
+    validated_by INTEGER,
+    created_at TEXT,
+    lieu_label TEXT,
+    subject_label TEXT
+);
 """
 
 # Tables métier (sans suffixe _ref) — utilisé par take_teacher_data + sync
@@ -307,6 +339,7 @@ BUSINESS_TABLES = (
     'larcauth_learnerdp_has_termsubjectdp',
     'larcauth_classroom_termothersubject',
     'larcauth_learner_has_termothersubject',
+    'student_event',
 )
 
 
@@ -338,6 +371,12 @@ class SQLiteInit:
         if conn is None:
             return False
         conn.executescript(_DDL)
+
+        # Migration PIN rate limiting
+        self._migrate_columns(conn, 'session_cache', [
+            ('pin_attempts', 'INTEGER DEFAULT 0'),
+            ('pin_locked_until', 'TEXT'),
+        ])
 
         # Migration : colonnes manquantes ajoutées après la création initiale
         self._migrate_columns(conn, 'larcauth_evaluation', [
@@ -379,6 +418,13 @@ class SQLiteInit:
         self._migrate_columns(conn, 'module_config', [
             ('theme_name', 'TEXT DEFAULT \'material_light\''),
             ('font_scale', 'REAL DEFAULT 1.0'),
+        ])
+        self._migrate_columns(conn, 'larcauth_classroom_termsubject', [
+            ('calc_formula', 'TEXT'),
+            ('subject_weight', 'REAL DEFAULT 1.0'),
+        ])
+        self._migrate_columns(conn, 'larcauth_aecuser', [
+            ('type_secretary', 'BOOLEAN DEFAULT FALSE'),
         ])
         return True
 
@@ -604,10 +650,24 @@ class SQLiteInit:
                 learner_other_rows = cur.fetchall()
                 learner_other_cols = [desc[0] for desc in cur.description]
 
+                # Table student_event (pour les eleves des classes du prof)
+                cur.execute("""
+                    SELECT DISTINCT se.*
+                    FROM public.student_event se
+                    JOIN public.larcauth_student s ON s.aecuser_ptr_id = se.student_id
+                    JOIN public.larcauth_classroom_termsubject cts
+                        ON cts.fk_classroom_id = s.s_classroom_id
+                    WHERE cts.fk_teacher_id = %s
+                      AND cts.fk_term_id = %s
+                      AND s.enabled = true
+                """, (user_id, term_id))
+                event_rows = cur.fetchall()
+                event_cols = [desc[0] for desc in cur.description]
+
                 if log_fn:
-                    log_fn(f"Requêtes séparées : {len(eval_rows)} évaluations, {len(pei_rows)} PEI, {len(dp_rows)} DP, {len(term_other_rows)} termothersubject, {len(learner_other_rows)} learner_termothersubject")
+                    log_fn(f"Requêtes séparées : {len(eval_rows)} évaluations, {len(pei_rows)} PEI, {len(dp_rows)} DP, {len(term_other_rows)} termothersubject, {len(learner_other_rows)} learner_termothersubject, {len(event_rows)} events")
                 else:
-                    msg = f"Requêtes séparées : {len(eval_rows)} évaluations, {len(pei_rows)} PEI, {len(dp_rows)} DP, {len(term_other_rows)} termothersubject, {len(learner_other_rows)} learner_termothersubject"
+                    msg = f"Requêtes séparées : {len(eval_rows)} évaluations, {len(pei_rows)} PEI, {len(dp_rows)} DP, {len(term_other_rows)} termothersubject, {len(learner_other_rows)} learner_termothersubject, {len(event_rows)} events"
                     _log(msg)
                     print(msg)
 
@@ -640,6 +700,7 @@ class SQLiteInit:
                 _seed_pair('larcauth_learnerdp_has_termsubjectdp', dp_cols, dp_rows)
                 _seed_pair('larcauth_classroom_termothersubject', term_other_cols, term_other_rows)
                 _seed_pair('larcauth_learner_has_termothersubject', learner_other_cols, learner_other_rows)
+                _seed_pair('student_event', event_cols, event_rows)
 
                 conn_sqlite.commit()
             except Exception:
@@ -800,6 +861,8 @@ class SQLiteInit:
             'larcauth_classroom_termothersubject_ref',
             'larcauth_learner_has_termothersubject',
             'larcauth_learner_has_termothersubject_ref',
+            'student_event',
+            'student_event_ref',
         ]
 
         cursor = conn.cursor()

@@ -23,6 +23,7 @@ from larccommon.widgets.table_settings import TableSettings
 from phibuilder.widgets import (
     M3Button,
     M3Card,
+    M3ChipBar,
     M3ComboBox,
     M3DateEdit,
     M3Dialog,
@@ -39,12 +40,13 @@ from phibuilder.widgets.button import ButtonVariant
 from phibuilder.widgets.card import CardVariant
 from PySide6.QtCore import QDate, QEvent, Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
 from larccommon.safe_slot import safe_slot
+from PySide6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
     QMessageBox,
+    QSplitter,
     QTableWidgetItem,
     QVBoxLayout,
     QWidget,
@@ -296,7 +298,7 @@ def _combo_qss() -> str:
     return (
         f"QComboBox {{ background: {p.surface}; color: {p.text_strong}; "
         f"border: 1px solid {p.outline}; border-radius: {ds.radius_xs}px; "
-        f"padding: 0 {ds.space_md}px; font-size: {ds.font_px_md}px; }}"
+        f"padding: 0 {ds.space_md}px; font-size: {ds.font_label_lg}px; }}"
         f"QComboBox::drop-down {{ border: none; width: {ds.space_xl}px; }}"
         f"QComboBox::down-arrow {{ width: {ds.space_md}px; height: {ds.space_md}px; }}"
         f"QComboBox QAbstractItemView {{ background: {p.surface}; color: {p.text_strong}; "
@@ -427,7 +429,7 @@ class _EntryDialog(M3Dialog):
 
         # ── Fichiers joints ──
         layout.addWidget(M3Label(_("dossier.attached_files"), style="title_small"))
-        self._file_table = M3TableWidget(theme=ds.phi)
+        self._file_table = M3TableWidget()
         self._file_table.setStyleSheet(ds.table_qss())
         self._file_table.set_headers([_("dossier.file_headers_name"), _("dossier.file_headers_doc")])
         self._file_table.horizontalHeader().setSectionResizeMode(0, M3HeaderView.Interactive)
@@ -455,7 +457,7 @@ class _EntryDialog(M3Dialog):
 
     # ── Champs dynamiques selon le type ──
 
-    @safe_slot("Unknown._rebuild_fields")
+    @safe_slot("_EntryDialog._rebuild_fields")
     def _rebuild_fields(self, *_args):
         """Reconstruit la zone de champs selon le type sélectionné.
 
@@ -546,7 +548,6 @@ class _EntryDialog(M3Dialog):
             self._file_table.setItem(i, 0, QTableWidgetItem(fname))
             self._file_table.setItem(i, 1, QTableWidgetItem(titre))
 
-    @safe_slot("Unknown._add_file")
     def _add_file(self):
         d = self._entry_dir()
         if not d:
@@ -558,7 +559,6 @@ class _EntryDialog(M3Dialog):
             shutil.copy2(p, os.path.join(d, os.path.basename(p)))
         self._refresh_files()
 
-    @safe_slot("Unknown._delete_file")
     def _delete_file(self):
         rows = self._file_table.selectionModel().selectedRows()
         if not rows:
@@ -580,7 +580,6 @@ class _EntryDialog(M3Dialog):
 
     # ── Sauvegarde ──
 
-    @safe_slot("Unknown._on_save")
     def _on_save(self):
         self._entry["type"] = self._type_combo.currentData()
         self._entry["status"] = self._status_combo.currentData()
@@ -615,93 +614,57 @@ class _Page(M3Frame):
 
     def _build(self):
         p = ds.p
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(ds.space_sm, ds.space_sm, ds.space_sm, 0)
-        layout.setSpacing(ds.space_sm)
+        # Layout principal : toolbar + (table || detail) en splitter horizontal
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # ── Fiche santé (section médicale uniquement) ──
-        # La fiche santé vit DANS la section Médical du dossier (pas d'onglet
-        # dédié) : allergies, notes médicales, contact urgence.
-        self._health_widgets: dict[str, QWidget] = {}
-        if self._key == "medicale":
-            fiche_card = M3Card(variant=CardVariant.ELEVATED)
-            fcl = fiche_card.content_layout()
-            fcl.setSpacing(ds.space_sm)
-            fcl.addWidget(M3Label(_("dossier.health_fiche"), style="title_small"))
-            fg = QGridLayout()
-            fg.setSpacing(ds.space_sm)
-            fg.setColumnStretch(0, 1)
-            fg.setColumnStretch(1, 1)
-            r = 0
-            fg.addWidget(M3Label(_("student_form.health_allergies"), style="label_small"), r, 0, 1, 2)
-            r += 1
-            self._health_widgets["allergies"] = M3TextEdit()
-            self._health_widgets["allergies"].setFixedHeight(ds.space_xxxl)
-            self._health_widgets["allergies"].setPlaceholderText(_("student_form.health_allergies_placeholder"))
-            fg.addWidget(self._health_widgets["allergies"], r, 0, 1, 2)
-            r += 1
-            fg.addWidget(M3Label(_("student_form.health_medical_notes"), style="label_small"), r, 0, 1, 2)
-            r += 1
-            self._health_widgets["medical_notes"] = M3TextEdit()
-            self._health_widgets["medical_notes"].setFixedHeight(ds.space_xxxl)
-            self._health_widgets["medical_notes"].setPlaceholderText(_("student_form.health_notes_placeholder"))
-            fg.addWidget(self._health_widgets["medical_notes"], r, 0, 1, 2)
-            r += 1
-            fg.addWidget(M3Label(_("student_form.health_emergency_contact"), style="label_small"), r, 0)
-            fg.addWidget(M3Label(_("student_form.health_emergency_phone"), style="label_small"), r, 1)
-            r += 1
-            self._health_widgets["emergency_contact"] = M3TextField()
-            self._health_widgets["emergency_contact"].setFixedHeight(ds.field_height)
-            fg.addWidget(self._health_widgets["emergency_contact"], r, 0)
-            self._health_widgets["emergency_phone"] = M3TextField()
-            self._health_widgets["emergency_phone"].setFixedHeight(ds.field_height)
-            fg.addWidget(self._health_widgets["emergency_phone"], r, 1)
-            fcl.addLayout(fg)
-            layout.addWidget(fiche_card)
+        # ── Toolbar : chips de filtre + actions ──
+        toolbar = QWidget()
+        toolbar.setStyleSheet(f"background: {p.surface}; border-bottom: 1px solid {p.outline_variant};")
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(ds.space_sm, ds.space_xs, ds.space_sm, ds.space_xs)
+        tb_layout.setSpacing(ds.space_xs)
 
-        # ── Barre d'actions : ajouter / supprimer / filtre par type ──
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(ds.space_xs)
-        add_btn = M3Button("+ " + _("dossier.add_entry"), variant=ButtonVariant.FILLED)
-        add_btn.clicked.connect(self._add_entry)
-        btn_row.addWidget(add_btn)
-        del_btn = M3Button("- " + _("dossier.delete_entry"), variant=ButtonVariant.OUTLINED)
-        del_btn.clicked.connect(self._delete_entry)
-        btn_row.addWidget(del_btn)
-        btn_row.addStretch()
-        filter_lbl = M3Label(_("dossier.filter_label"), style="label_small")
-        filter_lbl.setStyleSheet(f"color: {p.text_strong}; font-weight: bold;")
-        btn_row.addWidget(filter_lbl)
-        self._filter_combo = M3ComboBox()
-        self._filter_combo.addItem(_("dossier.filter.all"), "")
+        chip_items = [_("dossier.filter.all")]
         for t in _types_for(self._key):
-            self._filter_combo.addItem(_(t["label_key"]), t["key"])
-        self._filter_combo.setFixedHeight(ds.field_height)
-        self._filter_combo.setStyleSheet(_combo_qss())
-        self._filter_combo.currentIndexChanged.connect(self._refresh_table)
-        btn_row.addWidget(self._filter_combo)
-        layout.addLayout(btn_row)
+            chip_items.append(_(t["label_key"]))
+        self._filter_chips = M3ChipBar(chip_items)
+        tb_layout.addWidget(self._filter_chips, 1)
 
-        # ── Table principale : Date | Type | Statut | Titre | Description ──
-        self._table = M3TableWidget(theme=ds.phi)
+        add_btn = M3Button("+ " + _("dossier.add_entry"), variant=ButtonVariant.FILLED)
+        add_btn.setFixedHeight(ds.field_height)
+        add_btn.clicked.connect(self._add_entry)
+        tb_layout.addWidget(add_btn)
+        del_btn = M3Button(_("dossier.delete_entry"), variant=ButtonVariant.OUTLINED)
+        del_btn.setFixedHeight(ds.field_height)
+        del_btn.clicked.connect(self._delete_entry)
+        tb_layout.addWidget(del_btn)
+        main_layout.addWidget(toolbar)
+
+        # ── Splitter : table (gauche) | detail (droite) ──
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setHandleWidth(ds.border_width)
+        splitter.setStyleSheet(f"QSplitter::handle {{ background: {p.outline_variant}; }}")
+
+        # --- Tableau ---
+        table_wrapper = QWidget()
+        tl = QVBoxLayout(table_wrapper)
+        tl.setContentsMargins(ds.space_sm, ds.space_sm, ds.space_sm, ds.space_sm)
+        tl.setSpacing(0)
+        self._table = M3TableWidget()
         self._table.setStyleSheet(ds.table_qss())
-        self._table.set_headers(
-            [
-                _("dossier.table_headers"),
-                _("dossier.table_headers_type"),
-                _("dossier.table_headers_status"),
-                _("dossier.table_headers_title"),
-                _("dossier.table_headers_description"),
-            ]
-        )
+        self._table.set_headers([
+            _("dossier.table_headers"), _("dossier.table_headers_type"),
+            _("dossier.table_headers_status"), _("dossier.table_headers_title"),
+        ])
         hh = self._table.horizontalHeader()
+        hh.setFixedHeight(ds.field_height)
         hh.setSectionResizeMode(0, M3HeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, M3HeaderView.Interactive)
         hh.setSectionResizeMode(2, M3HeaderView.ResizeToContents)
-        hh.setSectionResizeMode(3, M3HeaderView.Interactive)
-        hh.setSectionResizeMode(4, M3HeaderView.Stretch)
+        hh.setSectionResizeMode(3, M3HeaderView.Stretch)
         self._table.setColumnWidth(1, ds.space_xxxl + ds.space_xl)
-        self._table.setColumnWidth(3, ds.space_xxxl * 2)
         self._table.setSelectionBehavior(M3TableWidget.SelectRows)
         self._table.setEditTriggers(M3TableWidget.NoEditTriggers)
         self._table.setAlternatingRowColors(False)
@@ -713,66 +676,114 @@ class _Page(M3Frame):
         self._table.cellDoubleClicked.connect(lambda r, c: self._edit_entry(r))
         self._table.horizontalHeader().sectionResized.connect(self._on_col_resize)
         TableSettings.restore(self._table, f"dossier/{self._key}")
-        layout.addWidget(self._table, 3)
+        tl.addWidget(self._table)
+        splitter.addWidget(table_wrapper)
 
-        # ── Fichiers + aperçu ──
-        bottom = QHBoxLayout()
-        bottom.setSpacing(ds.space_sm)
-        self._file_table = M3TableWidget(theme=ds.phi)
-        self._file_table.setStyleSheet(ds.table_qss())
-        self._file_table.set_headers([_("dossier.file_headers_name"), _("dossier.file_headers_doc")])
-        self._file_table.horizontalHeader().setSectionResizeMode(0, M3HeaderView.Interactive)
-        self._file_table.setColumnWidth(0, ds.space_xxl + ds.space_lg)
-        self._file_table.horizontalHeader().setSectionResizeMode(1, M3HeaderView.Stretch)
-        self._file_table.setSelectionBehavior(M3TableWidget.SelectRows)
-        self._file_table.setEditTriggers(M3TableWidget.NoEditTriggers)
-        self._file_table.setAlternatingRowColors(False)
-        self._file_table.verticalHeader().setDefaultSectionSize(ds.table_row_min)
-        self._file_table.viewport().setCursor(Qt.PointingHandCursor)
-        self._file_table.setToolTip(_("history.dblclick_hint"))
-        self._file_table.installEventFilter(self)
-        self._file_table.itemSelectionChanged.connect(self._on_file_selected)
-        self._file_table.cellDoubleClicked.connect(self._on_preview_file_row)
-        bottom.addWidget(self._file_table, 5)
-        self._preview_frame = M3Card(variant=CardVariant.FILLED, parent=self)
-        self._preview_layout = self._preview_frame.content_layout()
-        self._preview_widget = M3Label(_("dossier.preview_placeholder"))
-        self._preview_widget.setAlignment(Qt.AlignCenter)
-        self._preview_widget.setStyleSheet(f"font-size: {ds.font_px_sm}px; color: {p.text_disabled};")
-        self._preview_layout.addWidget(self._preview_widget)
-        bottom.addWidget(self._preview_frame, 8)
-        layout.addLayout(bottom, 5)
+        # --- Panneau detail ---
+        detail_wrapper = QWidget()
+        dl = QVBoxLayout(detail_wrapper)
+        dl.setContentsMargins(ds.space_sm, ds.space_sm, ds.space_sm, ds.space_sm)
+        dl.setSpacing(ds.space_sm)
 
+        self._detail_card = M3Card(variant=CardVariant.ELEVATED)
+        dcl = self._detail_card.content_layout()
+        dcl.setSpacing(ds.space_md)
+        self._detail_title = M3Label(_("dossier.detail_title"), style="title_small")
+        dcl.addWidget(self._detail_title)
+        self._detail_fields = QVBoxLayout()
+        self._detail_fields.setSpacing(ds.space_xs)
+        dcl.addLayout(self._detail_fields)
+        self._detail_note = M3Label("", style="body_medium")
+        self._detail_note.setWordWrap(True)
+        self._detail_note.setStyleSheet(f"color: {p.text_soft};")
+        dcl.addWidget(self._detail_note)
+        self._detail_files = QVBoxLayout()
+        self._detail_files.setSpacing(ds.space_xxs)
+        dcl.addLayout(self._detail_files)
+        self._detail_status = M3Label("", style="label_small")
+        dcl.addWidget(self._detail_status)
+        # Actions detail
+        detail_btns = QHBoxLayout()
+        detail_btns.setSpacing(ds.space_xs)
+        edit_btn = M3Button(_("dossier.edit_entry"), variant=ButtonVariant.TONAL)
+        edit_btn.clicked.connect(lambda: self._edit_entry(self._table.currentRow()))
+        detail_btns.addWidget(edit_btn)
+        detail_btns.addStretch()
+        dcl.addLayout(detail_btns)
+        dl.addWidget(self._detail_card)
+
+        # Fiche sante (medicale uniquement)
+        if self._key == "medicale":
+            health_card = M3Card(variant=CardVariant.ELEVATED)
+            hcl = health_card.content_layout()
+            hcl.setSpacing(ds.space_sm)
+            hcl.addWidget(M3Label(_("dossier.health_fiche"), style="title_small"))
+            self._health_widgets = {}
+            fg = QGridLayout()
+            fg.setSpacing(ds.space_sm)
+            fg.setColumnStretch(0, 1)
+            fg.setColumnStretch(1, 1)
+            fg.addWidget(M3Label(_("student_form.health_allergies"), style="label_small"), 0, 0, 1, 2)
+            self._health_widgets["allergies"] = M3TextEdit()
+            self._health_widgets["allergies"].setFixedHeight(ds.space_xxxl)
+            fg.addWidget(self._health_widgets["allergies"], 1, 0, 1, 2)
+            fg.addWidget(M3Label(_("student_form.health_medical_notes"), style="label_small"), 2, 0, 1, 2)
+            self._health_widgets["medical_notes"] = M3TextEdit()
+            self._health_widgets["medical_notes"].setFixedHeight(ds.space_xxxl)
+            fg.addWidget(self._health_widgets["medical_notes"], 3, 0, 1, 2)
+            fg.addWidget(M3Label(_("student_form.health_emergency_contact"), style="label_small"), 4, 0)
+            fg.addWidget(M3Label(_("student_form.health_emergency_phone"), style="label_small"), 4, 1)
+            self._health_widgets["emergency_contact"] = M3TextField()
+            self._health_widgets["emergency_contact"].setFixedHeight(ds.field_height)
+            fg.addWidget(self._health_widgets["emergency_contact"], 5, 0)
+            self._health_widgets["emergency_phone"] = M3TextField()
+            self._health_widgets["emergency_phone"].setFixedHeight(ds.field_height)
+            fg.addWidget(self._health_widgets["emergency_phone"], 5, 1)
+            hcl.addLayout(fg)
+            dl.addWidget(health_card)
+
+        dl.addStretch()
+        splitter.addWidget(detail_wrapper)
+        splitter.setSizes([600, 400])
+        main_layout.addWidget(splitter, 1)
+
+        # Connecter les chips de filtre
+        self._filter_chips.current_changed.connect(self._on_filter_chip)
         ds.theme_changed.connect(self._restyle)
 
-    @safe_slot("Unknown._restyle")
+    @safe_slot("_Page._restyle")
     def _restyle(self):
         self._table.setStyleSheet(ds.table_qss())
-        self._file_table.setStyleSheet(ds.table_qss())
-        self._filter_combo.setStyleSheet(_combo_qss())
-        self._preview_widget.setStyleSheet(f"font-size: {ds.font_px_sm}px; color: {ds.p.text_disabled};")
-        for w in self._health_widgets.values():
-            w.setStyleSheet(ds.flat_input_qss())
-        self._refresh_table()  # ré-applique les couleurs de badges avec la palette active
+        self._detail_note.setStyleSheet(f"color: {ds.p.text_soft};")
+        self._detail_card.setStyleSheet("")
+        self._refresh_table()
+
+    @safe_slot("_Page.on_filter_chip")
+    def _on_filter_chip(self, index: int):
+        self._current_filter_index = index
+        self._refresh_table()
 
     # ── CRUD entrées ──
 
     def _visible_entries(self) -> list[dict]:
-        """Entrées triées par date desc, filtrées par le type sélectionné.
-
-        Les anciennes entrées sans clé `type` sont normalisées en « document »
-        pour être cohérentes avec leur affichage (rétrocompatibilité).
-        """
         entries = sorted(self._entries, key=lambda e: e.get("date", ""), reverse=True)
-        ftype = self._filter_combo.currentData() if hasattr(self, "_filter_combo") else ""
-        if ftype:
-            entries = [e for e in entries if (e.get("type") or "document") == ftype]
+        idx = getattr(self, '_current_filter_index', 0)
+        if idx > 0:
+            types = _types_for(self._key)
+            if idx - 1 < len(types):
+                ftype = types[idx - 1]["key"]
+                entries = [e for e in entries if (e.get("type") or "document") == ftype]
         return entries
 
-    @safe_slot("Unknown._add_entry")
+    @safe_slot("_Page._add_entry")
     def _add_entry(self):
         no = len(self._entries) + 1
-        ftype = self._filter_combo.currentData() if hasattr(self, "_filter_combo") else ""
+        idx = getattr(self, '_current_filter_index', 0)
+        ftype = ""
+        if idx > 0:
+            types = _types_for(self._key)
+            if idx - 1 < len(types):
+                ftype = types[idx - 1]["key"]
         entry = {
             "no": no,
             "date": date.today().isoformat(),
@@ -801,7 +812,6 @@ class _Page(M3Frame):
                 self._refresh_table()
                 self.entries_changed.emit()
 
-    @safe_slot("Unknown._delete_entry")
     def _delete_entry(self):
         rows = self._table.selectionModel().selectedRows()
         if not rows:
@@ -827,7 +837,6 @@ class _Page(M3Frame):
         self._refresh_table()
         self.entries_changed.emit()
 
-    @safe_slot("Unknown._refresh_table")
     def _refresh_table(self, *_args):
         self._table.blockSignals(True)
         vis = self._visible_entries()
@@ -855,15 +864,10 @@ class _Page(M3Frame):
             self._table.setItem(i, 2, s_item)
             # Titre
             self._table.setItem(i, 3, QTableWidgetItem(e.get("titre", "")))
-            # Description (extrait)
-            doc = e.get("doc", "")
-            snippet = doc[:80].replace("\n", " ") + ("…" if len(doc) > 80 else "")
-            self._table.setItem(i, 4, QTableWidgetItem(snippet))
         self._table.blockSignals(False)
         if vis:
             self._table.selectRow(0)
 
-    @safe_slot("Unknown._on_select")
     def _on_select(self):
         rows = self._table.selectionModel().selectedRows()
         if rows:
@@ -871,9 +875,72 @@ class _Page(M3Frame):
             idx = rows[0].row()
             if 0 <= idx < len(vis):
                 self._current_entry = vis[idx]
-                self._refresh_files()
+                self._fill_detail(self._current_entry)
 
-    # ── Fichiers + aperçu ──
+    def _fill_detail(self, entry: dict):
+        """Remplit le panneau de detail avec les infos de l'entree."""
+        p = ds.p
+        # Titre
+        self._detail_title.setText(entry.get("titre", _("dossier.untitled")))
+        self._detail_title.setStyleSheet(f"color: {p.text_strong}; font-weight: bold;")
+
+        # Champs
+        while self._detail_fields.count():
+            item = self._detail_fields.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        type_key = entry.get("type", "document")
+        type_info = next((t for t in _types_for(self._key) if t["key"] == type_key), None)
+        if type_info:
+            for fdef in type_info.get("fields", []):
+                val = (entry.get("fields") or {}).get(fdef["key"], "")
+                row = QHBoxLayout()
+                lbl = M3Label(_(fdef["label_key"]) + ":", style="label_small")
+                lbl.setStyleSheet(f"color: {p.text_soft};")
+                row.addWidget(lbl)
+                val_lbl = M3Label(str(val) if val else "—", style="body_medium")
+                val_lbl.setStyleSheet(f"color: {p.text_strong};")
+                row.addWidget(val_lbl, 1)
+                self._detail_fields.addLayout(row)
+
+        # Note
+        doc = entry.get("doc", "")
+        self._detail_note.setText(doc[:200] + ("..." if len(doc) > 200 else ""))
+
+        # Statut
+        status = entry.get("status", "actif")
+        status_labels = {"actif": _("dossier.status.active"), "a_renouveler": _("dossier.status.to_renew"),
+                         "expire": _("dossier.status.expired"), "archive": _("dossier.status.archived")}
+        status_colors = {"actif": p.success, "a_renouveler": p.tertiary, "expire": p.error, "archive": p.text_disabled}
+        self._detail_status.setText(status_labels.get(status, status))
+        self._detail_status.setStyleSheet(
+            f"color: {status_colors.get(status, p.text_soft)}; font-weight: bold; "
+            f"padding: {ds.space_xxs}px {ds.space_sm}px; "
+            f"background: {status_colors.get(status, p.surface_variant)}; "
+            f"border-radius: {ds.radius_xs}px;")
+
+        # Fichiers
+        while self._detail_files.count():
+            item = self._detail_files.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        no = entry.get("no", 0)
+        if no and self._base_dir:
+            d = os.path.join(self._base_dir, str(no))
+            if os.path.isdir(d):
+                try:
+                    files = sorted(os.listdir(d))
+                except Exception:
+                    files = []
+                for fname in files:
+                    file_btn = M3Button(f"📎 {fname}", variant=ButtonVariant.TEXT)
+                    file_btn.setCursor(Qt.PointingHandCursor)
+                    file_btn.clicked.connect(
+                        lambda checked, d=d, fn=fname: FileViewer(
+                            os.path.join(d, fn), self).exec())
+                    self._detail_files.addWidget(file_btn)
+
+    # ── Fichiers ──
 
     def _entry_dir(self) -> str:
         if not self._base_dir:
@@ -883,30 +950,6 @@ class _Page(M3Frame):
         os.makedirs(d, exist_ok=True)
         return d
 
-    def _refresh_files(self):
-        d = self._entry_dir()
-        self._file_table.setRowCount(0)
-        if not d:
-            return
-        try:
-            files = sorted(os.listdir(d))
-        except Exception:
-            return
-        titre = self._current_entry.get("titre", "") if self._current_entry else ""
-        for i, fname in enumerate(files):
-            self._file_table.setRowCount(i + 1)
-            self._file_table.setItem(i, 0, QTableWidgetItem(fname))
-            self._file_table.setItem(i, 1, QTableWidgetItem(titre))
-
-    @safe_slot("Unknown._on_preview_file_row")
-    def _on_preview_file_row(self, row: int, col: int):
-        name = self._file_table.item(row, 0)
-        if not name:
-            return
-        from larccommon.widgets import FileViewer
-
-        FileViewer(os.path.join(self._entry_dir(), name.text()), self).exec()
-
     def eventFilter(self, obj, event):
         if event.type() == QEvent.KeyPress and event.key() in (Qt.Key_Return, Qt.Key_Enter):
             row = obj.currentRow()
@@ -915,19 +958,7 @@ class _Page(M3Frame):
             if obj is self._table:
                 self._edit_entry(row)
                 return True
-            if obj is self._file_table:
-                self._on_preview_file_row(row, 0)
-                return True
         return super().eventFilter(obj, event)
-
-    @safe_slot("Unknown._on_file_selected")
-    def _on_file_selected(self):
-        rows = self._file_table.selectionModel().selectedRows()
-        if not rows or not self._base_dir:
-            return
-        name = self._file_table.item(rows[0].row(), 0)
-        if not name:
-            return
         path = os.path.join(self._entry_dir(), name.text())
         ext = os.path.splitext(name.text())[1].lower()
         w = self._preview_layout.takeAt(0)
@@ -957,7 +988,6 @@ class _Page(M3Frame):
             lbl.setStyleSheet(f"font-size: {ds.font_px_sm}px; color: {ds.p.text_strong};")
             self._preview_layout.addWidget(lbl)
 
-    @safe_slot("Unknown._on_col_resize")
     def _on_col_resize(self, *_args):
         TableSettings.save(self._table, f"dossier/{self._key}")
 
@@ -966,7 +996,7 @@ class _Page(M3Frame):
     def set_directory(self, base_dir: str):
         self._base_dir = base_dir
         if self._current_entry:
-            self._refresh_files()
+            self._fill_detail(self._current_entry)
 
     def edit_entry(self, entry: dict):
         """Édite une entrée identifiée par son `no` — appelé depuis la timeline.
@@ -1073,7 +1103,7 @@ class _TimelinePage(M3Frame):
         layout.addLayout(filter_row)
 
         # ── Table : Date | Section | Type | Statut | Titre ──
-        self._table = M3TableWidget(theme=ds.phi)
+        self._table = M3TableWidget()
         self._table.setStyleSheet(ds.table_qss())
         self._table.set_headers(
             [
@@ -1166,7 +1196,7 @@ class _TimelinePage(M3Frame):
         rows.sort(key=lambda r: r.get("date", ""), reverse=True)
         return rows
 
-    @safe_slot("Unknown._refresh_table")
+    @safe_slot("_TimelinePage._refresh_table")
     def _refresh_table(self, *_args):
         self._table.blockSignals(True)
         vis = self._visible_entries()
@@ -1205,7 +1235,7 @@ class _TimelinePage(M3Frame):
 
     # ── Édition depuis la timeline ──
 
-    @safe_slot("Unknown._on_edit_row")
+    @safe_slot("_TimelinePage._on_edit_row")
     def _on_edit_row(self, row: int, col: int):
         vis = self._visible_entries()
         if 0 <= row < len(vis) and self._on_edit:
@@ -1245,30 +1275,57 @@ class DossierPanel(QWidget):
         ds.theme_changed.connect(self._restyle)
 
     def _build(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(ds.space_xs)
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(ds.space_xs)
-        # ── Bouton Chronologie : navigation vers l'ONGLET du dialogue hôte ──
+        # Layout principal : sidebar categories a gauche + contenu a droite
+        main_row = QHBoxLayout(self)
+        main_row.setContentsMargins(0, 0, 0, 0)
+        main_row.setSpacing(0)
+
+        # ── Sidebar categories ──
+        nav = QWidget()
+        nav.setFixedWidth(ds.jugements_width + ds.space_lg)  # ~176px
+        nav.setStyleSheet(f"background: {ds.p.surface_variant}; border: none; "
+                         f"border-right: 1px solid {ds.p.outline_variant};")
+        nav_layout = QVBoxLayout(nav)
+        nav_layout.setContentsMargins(ds.space_sm, ds.space_sm, ds.space_sm, ds.space_sm)
+        nav_layout.setSpacing(ds.space_xxs)
+
+        # Titre
+        nav_title = M3Label(_("dossier.categories"), style="title_small")
+        nav_title.setStyleSheet(f"color: {ds.p.text_strong}; font-weight: bold;")
+        nav_layout.addWidget(nav_title)
+        nav_layout.addSpacing(ds.space_sm)
+
+        # Bouton Chronologie
         self._tl_btn = M3Button(_("dossier.timeline.title"))
         self._tl_btn.setCursor(Qt.PointingHandCursor)
+        self._tl_btn.setCheckable(True)
         self._tl_btn.clicked.connect(self.timeline_requested.emit)
-        btn_row.addWidget(self._tl_btn)
+        nav_layout.addWidget(self._tl_btn)
+
+        # Separateur
+        sep = M3Frame()
+        sep.setFixedHeight(1)
+        sep.setStyleSheet(f"background: {ds.p.outline_variant};")
+        nav_layout.addWidget(sep)
+        nav_layout.addSpacing(ds.space_xs)
+
+        # Boutons des sections
         self._btns: list[M3Button] = []
         self._stack_info: list[tuple] = []
         for key, label in SECTIONS:
-            btn = M3Button(label)
+            btn = M3Button(label, variant=ButtonVariant.TEXT)
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setCheckable(True)
             btn.clicked.connect(lambda checked, k=key: self._select(k))
-            btn_row.addWidget(btn)
+            nav_layout.addWidget(btn)
             self._btns.append(btn)
             self._stack_info.append((key, label))
-        btn_row.addStretch()
-        layout.addLayout(btn_row)
+        nav_layout.addStretch()
+
+        main_row.addWidget(nav)
+
+        # ── Contenu (tableau + preview) ──
         self._stack = M3StackedWidget()
-        # La chronologie n'est PLUS dans le stack interne : elle est exposée via
-        # `self.timeline` pour être ajoutée comme onglet du dialogue hôte.
         self._timeline = _TimelinePage()
         self._timeline.set_on_edit(self.edit_from_timeline)
         for key, label in self._stack_info:
@@ -1276,7 +1333,8 @@ class DossierPanel(QWidget):
             self._pages.append(self._stack.widget(self._stack.count() - 1))
         for page in self._pages:
             page.entries_changed.connect(self._on_entries_changed)
-        layout.addWidget(self._stack, 1)
+        main_row.addWidget(self._stack, 1)
+
         self._select(self._current_key)
 
     @safe_slot("DossierPanel._on_entries_changed")
@@ -1288,9 +1346,23 @@ class DossierPanel(QWidget):
 
     def _select(self, key: str):
         self._current_key = key
+        p = ds.p
         for i, (k, _label) in enumerate(self._stack_info):
             if k == key:
                 self._stack.setCurrentIndex(i)
+        # Highlight le bouton actif
+        for i, btn in enumerate(self._btns):
+            if self._stack_info[i][0] == key:
+                btn.setStyleSheet(
+                    f"M3Button {{ background: {p.primary}; color: {p.on_primary}; "
+                    f"font-weight: bold; border: none; border-radius: {ds.radius_sm}px; "
+                    f"font-size: {ds.font_label_lg}px; padding: {ds.space_xs}px {ds.space_sm}px; }}")
+            else:
+                btn.setStyleSheet(
+                    f"M3Button {{ background: transparent; color: {p.text_strong}; "
+                    f"border: none; border-radius: {ds.radius_sm}px; "
+                    f"font-size: {ds.font_label_lg}px; padding: {ds.space_xs}px {ds.space_sm}px; }}"
+                    f"M3Button:hover {{ background: {p.surface_variant}; }}")
         self._restyle()
 
     # ── API publique (utilisée par le dialogue hôte pour la chronologie) ──
@@ -1322,7 +1394,7 @@ class DossierPanel(QWidget):
         p = ds.p
         btn_base = (
             f"M3Button {{ border: none; border-radius: {ds.radius_lg}px; "
-            f"padding: {ds.space_xs}px {ds.space_md}px; font-size: {ds.font_px_md}px; font-weight: bold; }}"
+            f"padding: {ds.space_xs}px {ds.space_md}px; font-size: {ds.font_label_lg}px; font-weight: bold; }}"
         )
         # Bouton « Chronologie » : tonal (distinct des sections) car il navigue
         # vers l'onglet du dialogue, il n'a pas d'état actif interne.

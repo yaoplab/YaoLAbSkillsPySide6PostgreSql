@@ -45,6 +45,7 @@ class Session:
     theme_pref       : str                = 'blue'
     card_theme       : str                = 'medium'
     type_flags       : dict               = field(default_factory=dict)
+    role_flags       : dict               = field(default_factory=dict)
 
 
 session: Session = Session(

@@ -5,11 +5,11 @@ category: quality
 trigger: audit infra, verifie infra, check infra, revue infra, base de donnees, synchronisation, sync
 ---
 
-# Infra Review - Audit Infrastructure Larc
+# Infra Review — Audit Infrastructure Larc
 
-Verifier les connexions PostgreSQL et la synchronisation.
+Vérifier les connexions PostgreSQL, la synchronisation, et le graphe de connaissances.
 
-## Procedure
+## Procédure
 
 1. Lancer les linters :
 ```bash
@@ -23,7 +23,13 @@ python C:/projets/scripts/lint_file_size.py --stats
 python -c "from larccommon.database import db; print('INTRANET OK' if db.connect_intranet() else 'FAIL')"
 ```
 
-3. Tester la synchronisation (si LarcCloudSync) :
+3. Vérifier le graphe de connaissances :
+```bash
+graphify god-nodes --top 10 --graph graphify-out/graph.json
+graphify query "Quelles sont les connexions principales entre les modules ?"
+```
+
+4. Tester la synchronisation (si LarcCloudSync) :
 ```bash
 python -c "from thothcommon.sync import sync_manager; print(sync_manager.sync_table('larcauth_aecuser'))"
 ```
@@ -33,16 +39,26 @@ python -c "from thothcommon.sync import sync_manager; print(sync_manager.sync_ta
 - [ ] db.connect_intranet() -> True
 - [ ] 0 import psycopg2 hors de database.py
 - [ ] 0 psycopg2.connect() direct
-- [ ] is_server_connected verifie avant requete
-- [ ] disconnect_all() a la fermeture
+- [ ] is_server_connected vérifié avant requête
+- [ ] disconnect_all() à la fermeture
 
 ## Checklist Sync
 - [ ] Connexion locale + cloud OK
-- [ ] sync_version present
+- [ ] sync_version présent
 - [ ] ON CONFLICT DO NOTHING sur INSERT
 - [ ] sslmode=require sur cloud
-- [ ] Mode degrade si cloud inaccessible
+- [ ] Mode dégradé si cloud inaccessible
 
-## Skills de reference
+## Checklist Graphify
+- [ ] Graphe à jour : `graphify god-nodes --top 5`
+- [ ] graphify-out/graph.json < 7 jours
+- [ ] God nodes cohérents avec l'architecture
+- [ ] Pas de fichiers critiques absents du graphe
+- [ ] Régénération après changement structurel
 
-- database-operations, sync, auth-intranet
+## Skills de référence
+
+- `database-operations` — connexions DB
+- `sync` — synchronisation local↔cloud
+- `auth-intranet` — auth PostgreSQL
+- `graphify` — graphe de connaissances du codebase

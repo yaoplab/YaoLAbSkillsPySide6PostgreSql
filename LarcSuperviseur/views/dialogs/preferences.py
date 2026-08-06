@@ -1,5 +1,6 @@
 from larccommon.design_system import ds
 from larccommon.l10n import Translator, _
+from larccommon.logger import log
 from phibuilder.widgets import M3Button, M3Dialog, M3Frame, M3Label
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -154,8 +155,8 @@ class PreferencesDialog(M3Dialog):
                         (f"user_{session.user_id}_{k}", v),
                     )
                 db.server_conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"PreferencesDialog save_prefs: {e}")
         conn = db.server_conn
         if conn and session.user_id:
             try:
@@ -165,15 +166,15 @@ class PreferencesDialog(M3Dialog):
                     (lang_id, session.user_id),
                 )
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"PreferencesDialog save_lang: {e}")
 
-    @safe_slot("Unknown._on_ok")
+    @safe_slot("PreferencesDialog._on_ok")
     def _on_ok(self):
         self._apply()
         self.accept()
 
-    @safe_slot("Unknown._on_cancel")
+    @safe_slot("PreferencesDialog._on_cancel")
     def _on_cancel(self):
         session.fk_language = self._orig_lang
         session.theme_pref = self._orig_theme

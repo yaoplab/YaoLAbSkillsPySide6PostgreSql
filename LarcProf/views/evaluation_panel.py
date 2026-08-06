@@ -88,32 +88,48 @@ class EvaluationDetailWidget(QWidget):
         self._load_criteria_labels()
 
     def _build_ui(self):
+        p = theme_manager.palette
+        s = theme_manager.font_size
         layout = QVBoxLayout(self)
         layout.setSpacing(ds.space_xs)
-        self.setStyleSheet("font-family: Roboto;")
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        p = theme_manager.palette
-        title = QLabel(f'{self.eval_type}{self.slot_index:02d}')
-        title.setStyleSheet(f"font-size: {theme_manager.font_size(14)}px; font-weight: bold; color: {p.text_strong};")
-        layout.addWidget(title)
+        # Titre (Q8: label au-dessus, pas QFormLayout)
+        self._title_lbl = QLabel(f'{self.eval_type}{self.slot_index:02d}')
+        self._title_lbl.setStyleSheet(
+            f"font-size: {s(16)}px; font-weight: bold; color: {p.text_strong};")
+        layout.addWidget(self._title_lbl)
 
         if self._subject_label:
             sl = QLabel(self._subject_label)
-            sl.setStyleSheet(f"font-size: {theme_manager.font_size(11)}px; color: {p.text_strong}; margin-top: -6px;")
+            sl.setStyleSheet(
+                f"font-size: {s(12)}px; color: {p.text_soft}; margin-top: -{ds.space_xxs}px;")
             sl.setWordWrap(True)
             layout.addWidget(sl)
 
-        form = QFormLayout()
-        form.setSpacing(ds.space_xxs)
+        # Label (affichage)
+        self._label_lbl = QLabel('Label :')
+        self._label_lbl.setStyleSheet(
+            f"font-size: {s(11)}px; font-weight: bold; color: {p.text_soft};")
+        layout.addWidget(self._label_lbl)
+
         self._label_display = QLabel('')
-        self._label_display.setStyleSheet(f"font-size: {theme_manager.font_size(11)}px; color: {p.text_strong}; padding: {ds.space_xxs}px 0;")
+        self._label_display.setStyleSheet(
+            f"font-size: {s(12)}px; color: {p.text_strong}; padding: {ds.space_xxs}px 0;")
         self._label_display.setWordWrap(True)
+        layout.addWidget(self._label_display)
+
+        # Nature
+        self._nature_lbl = QLabel('Nature :')
+        self._nature_lbl.setStyleSheet(
+            f"font-size: {s(11)}px; font-weight: bold; color: {p.text_soft};")
+        layout.addWidget(self._nature_lbl)
+
         self._nature_edit = QLineEdit()
         self._nature_edit.setPlaceholderText('Nature (ex: Devoir, Interrogation, Projet...)')
-        self._nature_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        form.addRow('Label :', self._label_display)
-        form.addRow('Nature :', self._nature_edit)
-        layout.addLayout(form)
+        self._nature_edit.setMinimumHeight(ds.field_height)
+        self._nature_edit.setStyleSheet(ds.flat_input_qss())
+        layout.addWidget(self._nature_edit)
 
         src_label = QLabel('Source / Texte de l\'évaluation :')
         src_label.setStyleSheet(f"font-size: {theme_manager.font_size(10)}px; font-weight: bold; color: {theme_manager.palette.text_strong};")
@@ -187,7 +203,7 @@ class EvaluationDetailWidget(QWidget):
 
         ds.theme_changed.connect(self._restyle)
 
-    @safe_slot("Unknown._restyle")
+    @safe_slot("EvaluationDetailWidget._restyle")
     def _restyle(self):
         p = theme_manager.palette
         d = theme_manager.design
@@ -638,7 +654,7 @@ class EvaluationPanel(QFrame):
                 slot.clicked.disconnect()
                 slot.clicked.connect(self._on_slot_clicked_manager)
 
-    @safe_slot("Unknown._on_slot_clicked")
+    @safe_slot("EvaluationPanel._on_slot_clicked")
     def _on_slot_clicked(self, slot_index: int):
         """Ouvre la boîte de dialogue modale pour ce slot (mode compact)."""
         if self._termsubject_id is None:
@@ -651,7 +667,7 @@ class EvaluationPanel(QFrame):
             form_data = dlg.get_form_data()
             self._save_criteria(slot, form_data)
 
-    @safe_slot("Unknown._on_slot_clicked_manager")
+    @safe_slot("EvaluationPanel._on_slot_clicked_manager")
     def _on_slot_clicked_manager(self, slot_index: int):
         """Signal émis quand le manager veut afficher ce slot dans le détail."""
         self.slot_selected.emit(slot_index)
@@ -765,27 +781,15 @@ class EvaluationPanel(QFrame):
 
     def _save_criteria(self, slot: _SlotButton, data: dict):
         """Sauvegarde nature, source et critères dans la base."""
-        conn = db.local_conn
-        if conn is None or slot.eval_id is None:
+        if slot.eval_id is None:
             return
         try:
+            from common.eval_helpers import save_evaluation_criteria
             label_val = (slot._data or {}).get('label', '')
-            conn.execute("""
-                UPDATE larcauth_evaluation
-                SET label=?, nature=?, source=?,
-                    crit_a=?, crit_b=?, crit_c=?, crit_d=?
-                WHERE id=?
-            """, (
-                label_val,
-                data.get('nature', ''),
-                data.get('source', ''),
-                data.get('crit_a', '0'),
-                data.get('crit_b', '0'),
-                data.get('crit_c', '0'),
-                data.get('crit_d', '0'),
-                slot.eval_id,
-            ))
-            conn.commit()
+            if not save_evaluation_criteria(slot.eval_id, label_val,
+                    data.get('nature', ''), data.get('source', ''),
+                    {k: data.get(k, '0') for k in ('crit_a', 'crit_b', 'crit_c', 'crit_d')}):
+                return
             if slot._data:
                 slot._data['nature'] = data.get('nature', '')
                 slot._data['source'] = data.get('source', '')
@@ -795,15 +799,13 @@ class EvaluationPanel(QFrame):
             self._update_indicators()
             self._update_layout()
         except Exception as e:
-            print(f"Erreur sauvegarde évaluation {slot.eval_id}: {e}")
+            print(f"Erreur sauvegarde evaluation {slot.eval_id}: {e}")
 
     def load_evaluations(self, termsubject_id: int):
         """Charge les évaluations depuis SQLite pour ce termsubject_id."""
-        print(f"[TRACE] EvaluationPanel({self.eval_type}).load_evaluations(ts_id={termsubject_id})")
         self._termsubject_id = termsubject_id
         conn = db.local_conn
         if conn is None:
-            print("[TRACE]   conn is None -> clear_panel")
             self.clear_panel()
             return
         try:
@@ -811,7 +813,6 @@ class EvaluationPanel(QFrame):
                 SELECT label FROM larcauth_classroom_termsubject WHERE id = ?
             """, (str(termsubject_id),)).fetchone()
             subject_label = row[0] if row else ''
-            print(f"[TRACE]   subject_label='{subject_label}'")
 
             self._load_criteria_legend(termsubject_id)
 
@@ -825,7 +826,6 @@ class EvaluationPanel(QFrame):
                   AND CAST(index_eval AS INTEGER) BETWEEN 1 AND 12
                 ORDER BY CAST(index_eval AS INTEGER)
             """, (str(termsubject_id), self.eval_type)).fetchall()
-            print(f"[TRACE]   {len(rows)} evaluations found")
 
             loaded = {int(r[1]): r for r in rows}
             for slot in self._slots:
@@ -840,11 +840,9 @@ class EvaluationPanel(QFrame):
                     slot.clear()
             self._update_indicators()
             self._update_layout()
-            print(f"[TRACE]   done, _termsubject_id={self._termsubject_id}")
         except Exception as e:
             import traceback
             traceback.print_exc()
-            print(f"[TRACE]   Exception dans load_evaluations: {e}")
             self.clear_panel()
 
     def clear_panel(self):

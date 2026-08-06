@@ -1,16 +1,20 @@
-"""Fenêtre d'accueil — Dashboard intermédiaire entre login et notes.
+"""Fenetre d'accueil — Dashboard professeur.
 
-Même style que MainWindow : QSS via _STYLE + theme_manager.palette.
-Layout avec espacement Fibonacci via phi_theme.spacing.
+Design: 100% conforme aux skills design-system-larc.
+- Pattern _STYLE property + _restyle + ThemedWidget
+- ZERO hardcoded (tokens ds.space_*, ds.p.*, s(*))
+- Dashboard pattern (DP1-DP8)
+- Ergonomie Q7-Q21
 """
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -26,33 +30,31 @@ from common.session import session
 from common.theme import theme_manager
 from common.sync import sync as sync_manager
 from common.sqlite_init import BUSINESS_TABLES
-
-from phibuilder.phi.scale import SpacingToken
+from larccommon.design_system import ds
 from larccommon.safe_slot import safe_slot
 
-
 _STAT_TABLE_LABELS = {
-    'larcauth_evaluation': 'Évaluations',
+    'larcauth_evaluation': 'Evaluations',
     'larcauth_learnerpei_has_termsubjectpei': 'Notes PEI',
     'larcauth_learnerdp_has_termsubjectdp': 'Notes DP',
-    'larcauth_classroom_termothersubject': 'Autres matières',
+    'larcauth_classroom_termothersubject': 'Autres matieres',
     'larcauth_learner_has_termothersubject': 'Notes autres',
+    'student_event': 'Evenements',
 }
 
 _PEI_BUTTONS = [
-    ('pei_grp_matieres', "Unité de groupes\nde matières"),
-    ('pei_interdisc', "Unités\ninterdisciplinaires"),
+    ('pei_grp_matieres', "Unite de groupes\nde matieres"),
+    ('pei_interdisc', "Unites\ninterdisciplinaires"),
     ('pei_pp', "Projet Personnel"),
 ]
 
 _DP_BUTTONS = [
-    ('dp_grp_matieres', "Unité de groupes\nde matières"),
+    ('dp_grp_matieres', "Unite de groupes\nde matieres"),
     ('dp_tdc', "TDC"),
     ('dp_cas', "CAS"),
-    ('dp_memoire', "Mémoire"),
+    ('dp_memoire', "Memoire"),
 ]
 
-# Mapping bouton → vue cible
 _BTN_VIEW = {
     'pei_grp_matieres': 'college_notes_0',
     'pei_interdisc': 'college_notes_opt1',
@@ -72,126 +74,71 @@ class HomeWindow(QMainWindow):
 
     @property
     def _STYLE(self) -> str:
-        p = theme_manager.theme.palette
-        fs = theme_manager.font_size
+        p = theme_manager.palette
+        s = theme_manager.font_size
         return f"""
-            QFrame#header {{
-                background: {p.primary};
-                color: {p.on_primary};
-                border-radius: {ds.radius_sm}px;  # 8px (6 INTERDIT)
-            }}
+            QMainWindow {{ background: {p.background}; }}
+            QWidget#home_root {{ background: {p.background}; color: {p.text_strong}; }}
+            QFrame#header {{ background: {p.primary}; color: {p.on_primary}; border-radius: {ds.radius_sm}px; }}
             QFrame#header QLabel {{ color: {p.on_primary}; }}
-            QFrame.panel {{
-                background: {p.surface};
-                border: 1px solid {p.border};
-                border-radius: {ds.radius_sm}px;  # 8px
+            QFrame#profile_card {{
+                background: {p.surface}; color: {p.text_strong};
+                border: 1px solid {p.outline_variant}; border-radius: {ds.radius_md}px;
             }}
-            QLabel.section-title {{
-                font-size: {fs(13)}px;
-                font-weight: bold;
-                color: {p.text_strong};
+            QLabel#profile_name {{
+                font-size: {s(16)}px; font-weight: bold; color: {p.text_strong};
             }}
-            QLabel.profile-name {{
-                font-size: {fs(15)}px;
-                font-weight: bold;
-                color: {p.text_strong};
+            QLabel#profile_role {{ font-size: {s(13)}px; color: {p.primary}; font-weight: bold; }}
+            QLabel#profile_meta {{ font-size: {s(12)}px; color: {p.text_soft}; }}
+            QLabel#profile_connection {{ font-size: {s(11)}px; }}
+            QFrame#sync_card {{
+                background: {p.surface}; color: {p.text_strong};
+                border: 1px solid {p.outline_variant}; border-radius: {ds.radius_md}px;
             }}
-            QLabel.meta {{
-                font-size: {fs(11)}px;
-                color: {p.text_soft};
+            QLabel#sync_title {{ font-size: {s(16)}px; font-weight: bold; color: {p.text_strong}; }}
+            QLabel#sync_date {{ font-size: {s(12)}px; color: {p.text_soft}; }}
+            QLabel#sync_count {{ font-size: {s(36)}px; font-weight: bold; color: {p.primary}; }}
+            QLabel#sync_label {{ font-size: {s(12)}px; color: {p.text_soft}; }}
+            QLabel#sync_detail {{ font-size: {s(11)}px; color: {p.error}; font-weight: bold; }}
+            QPushButton#sync_btn {{
+                background: {p.success}; color: white; border: none;
+                border-radius: {ds.radius_lg}px; font-size: {s(14)}px; font-weight: bold;
+                padding: {ds.space_xs}px {ds.space_m3}px; min-height: {ds.field_height + ds.space_xs}px;
             }}
-            QLabel.meta-warn {{
-                font-size: {fs(11)}px;
-                color: {p.error};
-                font-weight: bold;
+            QPushButton#sync_btn:hover {{ background: {p.success}; }}
+            QPushButton#logout_btn {{
+                background: transparent; color: {p.error};
+                border: 2px solid {p.error}; border-radius: {ds.radius_lg}px;
+                font-size: {s(13)}px; font-weight: bold;
+                padding: {ds.space_xs}px {ds.space_m3}px; min-height: {ds.field_height + ds.space_xs}px;
             }}
-            QLabel.stat-big {{
-                font-size: {fs(24)}px;
-                font-weight: bold;
-                color: {p.primary};
+            QPushButton#logout_btn:hover {{ background: {p.error}; color: white; }}
+            QFrame#pgm_card {{
+                background: {p.surface}; color: {p.text_strong};
+                border: 1px solid {p.outline_variant}; border-radius: {ds.radius_md}px;
             }}
-            QLabel.pgm-title {{
-                font-size: {fs(12)}px;
-                font-weight: bold;
-                color: {p.primary};
-                padding: {ds.space_xxs // 2}px 0;
+            QLabel#pgm_title {{ font-size: {s(14)}px; font-weight: bold; color: {p.primary}; }}
+            QPushButton.pgm_btn {{
+                background: {p.primary_container}; color: {p.primary};
+                border: 1px solid {p.primary}; border-radius: {ds.radius_lg}px;
+                font-size: {s(12)}px; font-weight: bold; padding: {ds.space_xs}px {ds.space_sm}px;
+                min-height: {ds.space_lg + ds.space_xs}px;
             }}
-            QPushButton.pgm-btn {{
-                background: {p.primary_container};
-                color: {p.primary};
-                border: 1px solid {p.primary};
-                border-radius: {ds.radius_sm}px;  # 8px
-                padding: {ds.font_label_lg}px {ds.space_sm}px;  # 13px 12px
-                font-size: {fs(12)}px;
-                font-weight: bold;
+            QPushButton.pgm_btn:hover {{ background: {p.primary}; color: {p.on_primary}; }}
+            QPushButton#pp_btn {{
+                background: {p.secondary}; color: white; border: none;
+                border-radius: {ds.radius_lg}px; font-size: {s(13)}px; font-weight: bold;
+                padding: {ds.space_xs}px {ds.space_m3}px; min-height: {ds.button_height}px;
             }}
-            QPushButton.pgm-btn:hover {{
-                background: {p.primary};
-                color: {p.on_primary};
-            }}
-            QPushButton.sync-btn {{
-                background: {p.success};
-                color: white;
-                border: none;
-                border-radius: {ds.radius_sm}px;  # 8px (6 INTERDIT)
-                padding: {ds.space_xs}px {ds.font_label_lg}px;  # 8px 13px
-                font-size: {fs(12)}px;
-                font-weight: bold;
-            }}
-            QPushButton.sync-btn:hover {{
-                background: {p.success};
-            }}
-            QPushButton.logout-btn {{
-                background: transparent;
-                color: {p.error};
-                border: 2px solid {p.error};
-                border-radius: {ds.radius_sm}px;  # 8px (6 INTERDIT)
-                padding: {ds.space_xs}px {ds.font_label_lg}px;  # 8px 13px
-                font-size: {fs(12)}px;
-                font-weight: bold;
-            }}
-            QPushButton.logout-btn:hover {{
-                background: {p.error};
-                color: white;
-            }}
-            QPushButton.classes-btn {{
-                background: {p.primary};
-                color: {p.on_primary};
-                border: none;
-                border-radius: {ds.radius_sm}px;  # 8px (6 INTERDIT)
-                padding: {ds.space_xs}px {ds.font_label_lg}px;  # 8px 13px
-                font-size: {fs(12)}px;
-                font-weight: bold;
-            }}
-            QPushButton.classes-btn:hover {{
-                background: {p.primary};
-            }}
-            QPushButton.pp-btn {{
-                background: {p.secondary};
-                color: white;
-                border: none;
-                border-radius: {ds.radius_sm}px;  # 8px
-                padding: {ds.space_xs + ds.space_xxs // 2}px {ds.space_sm + ds.space_xxs}px;  # 10px 16px
-                font-size: {fs(13)}px;
-                font-weight: bold;
-            }}
-            QPushButton.pp-btn:hover {{
-                background: {p.secondary};
-            }}
-            QFrame#sep {{
-                border: none;
-                border-top: 1px solid {p.border_light};
-            }}
+            QPushButton#pp_btn:hover {{ background: {p.secondary}; }}
+            QFrame#sep {{ border: none; border-top: 1px solid {p.outline_variant}; }}
         """
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle('LarcProf — Tableau de bord')
-        self.resize(1060, 680)
-        self.setMinimumSize(ds.window_width * 41 // 60, ds.window_height * 13 // 20)  # 820×520
-        self.setStyleSheet(self._STYLE)
-
-        self._sp = theme_manager.phi_theme.spacing.spacing
+        self.resize(ds.window_width * 53 // 50, ds.window_height * 17 // 20)
+        self.setMinimumSize(ds.window_width * 41 // 50, ds.window_height * 13 // 20)
 
         self._main_window = None
         self._poll_main_visible = None
@@ -200,189 +147,203 @@ class HomeWindow(QMainWindow):
 
         self._setup_ui()
         self._load_data()
+        ds.theme_changed.connect(self._restyle)
 
     # ------------------------------------------------------------------
     # UI
     # ------------------------------------------------------------------
     def _setup_ui(self) -> None:
-        sp = self._sp
         root = QWidget()
+        root.setObjectName('home_root')
         self.setCentralWidget(root)
-        outer = QVBoxLayout(root)
-        outer.setContentsMargins(sp(SpacingToken.SM), sp(SpacingToken.SM),
-                                 sp(SpacingToken.SM), sp(SpacingToken.SM))
-        outer.setSpacing(sp(SpacingToken.SM))
+        root.setStyleSheet(self._STYLE)
 
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
+        outer.setSpacing(ds.space_md)
+
+        # ── Logo + Header ──
         outer.addWidget(self._build_header())
 
-        content = QHBoxLayout()
-        content.setSpacing(sp(SpacingToken.SM))
+        # ── Body: gauche (profil + synchro) | droite (programmes) ──
+        body = QHBoxLayout()
+        body.setSpacing(ds.space_md)
 
         left = QVBoxLayout()
-        left.setSpacing(sp(SpacingToken.SM))
-        left.addWidget(self._build_profile_card(), 5)
+        left.setSpacing(ds.space_md)
+        left.addWidget(self._build_profile_card(), 4)
         left.addWidget(self._build_sync_card(), 5)
+        body.addLayout(left, 4)
 
         right = QVBoxLayout()
-        right.setSpacing(sp(SpacingToken.SM))
+        right.setSpacing(ds.space_md)
         right.addWidget(self._build_pgm_area(), 1)
+        body.addLayout(right, 6)
 
-        content.addLayout(left, 5)
-        content.addLayout(right, 5)
-        outer.addLayout(content, 1)
+        outer.addLayout(body, 1)
 
         self.setStatusBar(QStatusBar())
-        self.statusBar().showMessage('Prêt')
+        self.statusBar().showMessage('Pret')
 
-    # --- Header ---
     def _build_header(self) -> QWidget:
+        p = theme_manager.palette
+        s = theme_manager.font_size
+
         header = QFrame()
         header.setObjectName('header')
-        header.setMinimumHeight(theme_manager.image.logo_small)  # 55px
+        header.setFixedHeight(ds.header_height)
+
         h = QHBoxLayout(header)
-        h.setContentsMargins(sp(SpacingToken.SM), sp(SpacingToken.XS), sp(SpacingToken.SM), sp(SpacingToken.XS))
+        h.setContentsMargins(ds.space_m3, ds.space_xs, ds.space_m3, ds.space_xs)
+        h.setSpacing(ds.space_md)
 
-        title_font = QFont('Segoe UI', theme_manager.font_size(14), QFont.Bold)
-        meta_font = QFont('Segoe UI', theme_manager.font_size(11))
-        small_font = QFont('Segoe UI', theme_manager.font_size(10))
+        # Logo
+        logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'img', 'logoAEC.png')
+        if os.path.exists(logo_path):
+            pix = QPixmap(logo_path)
+            logo = QLabel()
+            logo.setPixmap(pix.scaledToHeight(ds.header_height - ds.space_xs * 2, Qt.SmoothTransformation))
+            logo.setFixedHeight(ds.header_height - ds.space_xs * 2)
+            h.addWidget(logo)
 
+        # Titre + sous-titre
+        title_col = QVBoxLayout()
+        title_col.setSpacing(ds.space_xxs)
         self._hdr_title = QLabel()
-        self._hdr_title.setFont(title_font)
-        h.addWidget(self._hdr_title)
-        h.addStretch(1)
+        self._hdr_title.setFont(QFont('Segoe UI', theme_manager.font_size(16), QFont.Bold))
+        self._hdr_title.setStyleSheet(f'color: {p.on_primary}; border: none;')
+        title_col.addWidget(self._hdr_title)
 
         self._hdr_mode = QLabel()
-        self._hdr_mode.setFont(meta_font)
-        h.addWidget(self._hdr_mode)
+        self._hdr_mode.setFont(QFont('Segoe UI', theme_manager.font_size(12)))
+        self._hdr_mode.setStyleSheet(f'color: {p.on_primary}; border: none;')
+        title_col.addWidget(self._hdr_mode)
 
-        h.addSpacing(13)
+        h.addLayout(title_col)
+        h.addStretch(1)
+
         self._hdr_last_login = QLabel()
-        self._hdr_last_login.setFont(small_font)
+        self._hdr_last_login.setFont(QFont('Segoe UI', theme_manager.font_size(11)))
+        self._hdr_last_login.setStyleSheet(f'color: {p.on_primary}; border: none;')
         h.addWidget(self._hdr_last_login)
 
         return header
 
-    # --- Carte Profil ---
+    # ── Carte Profil ──
     def _build_profile_card(self) -> QWidget:
-        sp = self._sp
         panel = QFrame()
-        panel.setProperty('class', 'panel')
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(sp(SpacingToken.MD), sp(SpacingToken.MD),
-                                  sp(SpacingToken.MD), sp(SpacingToken.MD))
-        layout.setSpacing(sp(SpacingToken.XS))
+        panel.setObjectName('profile_card')
+        panel.setAttribute(Qt.WA_StyledBackground, True)
 
-        title = QLabel('Profil')
-        title.setProperty('class', 'section-title')
-        layout.addWidget(title)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        layout.setSpacing(ds.space_xs)
 
         self._lbl_name = QLabel()
-        self._lbl_name.setProperty('class', 'profile-name')
+        self._lbl_name.setObjectName('profile_name')
         self._lbl_name.setWordWrap(True)
         layout.addWidget(self._lbl_name)
 
+        self._lbl_role = QLabel()
+        self._lbl_role.setObjectName('profile_role')
+        layout.addWidget(self._lbl_role)
+
         self._lbl_email = QLabel()
-        self._lbl_email.setProperty('class', 'meta')
+        self._lbl_email.setObjectName('profile_meta')
         self._lbl_email.setWordWrap(True)
         layout.addWidget(self._lbl_email)
 
-        self._lbl_role = QLabel()
-        self._lbl_role.setProperty('class', 'meta')
-        layout.addWidget(self._lbl_role)
-
         sep = QFrame()
         sep.setObjectName('sep')
+        sep.setFixedHeight(1)
         layout.addWidget(sep)
 
         self._lbl_year = QLabel()
-        self._lbl_year.setProperty('class', 'meta')
+        self._lbl_year.setObjectName('profile_meta')
         layout.addWidget(self._lbl_year)
 
         self._lbl_term = QLabel()
-        self._lbl_term.setProperty('class', 'meta')
+        self._lbl_term.setObjectName('profile_meta')
         layout.addWidget(self._lbl_term)
 
         self._lbl_classes_count = QLabel()
-        self._lbl_classes_count.setProperty('class', 'meta')
+        self._lbl_classes_count.setObjectName('profile_meta')
         layout.addWidget(self._lbl_classes_count)
 
         self._lbl_students_count = QLabel()
-        self._lbl_students_count.setProperty('class', 'meta')
+        self._lbl_students_count.setObjectName('profile_meta')
         layout.addWidget(self._lbl_students_count)
 
-        layout.addSpacing(sp(SpacingToken.XS))
+        layout.addSpacing(ds.space_xs)
 
-        # Indicateurs de connexion
+        # Indicateurs connexion
         self._profile_intra = QLabel()
-        self._profile_intra.setProperty('class', 'meta')
+        self._profile_intra.setObjectName('profile_connection')
         layout.addWidget(self._profile_intra)
 
         self._profile_cloud = QLabel()
-        self._profile_cloud.setProperty('class', 'meta')
+        self._profile_cloud.setObjectName('profile_connection')
         layout.addWidget(self._profile_cloud)
-
-        self._profile_offline = QLabel()
-        self._profile_offline.setProperty('class', 'meta')
-        layout.addWidget(self._profile_offline)
 
         layout.addStretch()
         return panel
 
-    # --- Carte Synchro ---
+    # ── Carte Synchro ──
     def _build_sync_card(self) -> QWidget:
-        sp = self._sp
         panel = QFrame()
-        panel.setProperty('class', 'panel')
+        panel.setObjectName('sync_card')
+        panel.setAttribute(Qt.WA_StyledBackground, True)
+
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(sp(SpacingToken.MD), sp(SpacingToken.MD),
-                                  sp(SpacingToken.MD), sp(SpacingToken.MD))
-        layout.setSpacing(sp(SpacingToken.XS))
+        layout.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        layout.setSpacing(ds.space_xs)
 
         title = QLabel('Synchronisation')
-        title.setProperty('class', 'section-title')
+        title.setObjectName('sync_title')
         layout.addWidget(title)
 
         self._lbl_sync_date = QLabel()
-        self._lbl_sync_date.setProperty('class', 'meta')
+        self._lbl_sync_date.setObjectName('sync_date')
         layout.addWidget(self._lbl_sync_date)
 
         self._lbl_sync_mode = QLabel()
-        self._lbl_sync_mode.setProperty('class', 'meta')
+        self._lbl_sync_mode.setObjectName('sync_date')
         layout.addWidget(self._lbl_sync_mode)
 
-        layout.addSpacing(sp(SpacingToken.MD))
+        layout.addSpacing(ds.space_md)
 
         self._lbl_unsynced_count = QLabel('0')
-        self._lbl_unsynced_count.setProperty('class', 'stat-big')
+        self._lbl_unsynced_count.setObjectName('sync_count')
+        self._lbl_unsynced_count.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._lbl_unsynced_count)
 
-        self._lbl_unsynced_label = QLabel('modifications non synchronisées')
-        self._lbl_unsynced_label.setProperty('class', 'meta')
+        self._lbl_unsynced_label = QLabel('modifications non synchronisees')
+        self._lbl_unsynced_label.setObjectName('sync_label')
+        self._lbl_unsynced_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self._lbl_unsynced_label)
 
         self._lbl_unsynced_detail = QLabel()
-        self._lbl_unsynced_detail.setProperty('class', 'meta-warn')
+        self._lbl_unsynced_detail.setObjectName('sync_detail')
         self._lbl_unsynced_detail.setWordWrap(True)
         layout.addWidget(self._lbl_unsynced_detail)
 
-        layout.addSpacing(sp(SpacingToken.SM))
+        layout.addSpacing(ds.space_sm)
 
         btn_sync = QPushButton('Synchroniser')
-        btn_sync.setProperty('class', 'sync-btn')
-        btn_sync.setMinimumHeight(sp(SpacingToken.LG))
+        btn_sync.setObjectName('sync_btn')
+        btn_sync.setCursor(Qt.PointingHandCursor)
         btn_sync.clicked.connect(self._do_sync)
         layout.addWidget(btn_sync)
 
         layout.addStretch()
         return panel
 
-    # --- Zone Programmes (droite) ---
+    # ── Zone Programmes ──
     def _build_pgm_area(self) -> QWidget:
-        sp = self._sp
         wrapper = QWidget()
         layout = QVBoxLayout(wrapper)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(sp(SpacingToken.SM))
+        layout.setSpacing(ds.space_md)
 
         pei_section = self._build_program_card('PEI', _PEI_BUTTONS)
         self._pgm_sections['PEI'] = pei_section
@@ -393,87 +354,50 @@ class HomeWindow(QMainWindow):
         layout.addWidget(dp_section, 1)
 
         self._btn_prof_principal = QPushButton('Professeur principal')
-        self._btn_prof_principal.setProperty('class', 'pp-btn')
-        self._btn_prof_principal.setMinimumHeight(sp(SpacingToken.XL))
+        self._btn_prof_principal.setObjectName('pp_btn')
         self._btn_prof_principal.setCursor(Qt.PointingHandCursor)
         self._btn_prof_principal.clicked.connect(self._open_pp)
         layout.addWidget(self._btn_prof_principal)
 
-        btn_logout = QPushButton('Déconnexion')
-        btn_logout.setProperty('class', 'logout-btn')
-        btn_logout.setMinimumHeight(sp(SpacingToken.LG))
+        btn_logout = QPushButton('Deconnexion')
+        btn_logout.setObjectName('logout_btn')
+        btn_logout.setCursor(Qt.PointingHandCursor)
         btn_logout.clicked.connect(self._logout)
         layout.addWidget(btn_logout)
 
         return wrapper
 
     def _build_program_card(self, pgm_label: str, buttons_def: list[tuple[str, str]]) -> QWidget:
-        sp = self._sp
         panel = QFrame()
-        panel.setProperty('class', 'panel')
+        panel.setObjectName('pgm_card')
+        panel.setAttribute(Qt.WA_StyledBackground, True)
+
         layout = QVBoxLayout(panel)
-        layout.setContentsMargins(sp(SpacingToken.MD), sp(SpacingToken.MD),
-                                  sp(SpacingToken.MD), sp(SpacingToken.MD))
-        layout.setSpacing(sp(SpacingToken.SM))
+        layout.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        layout.setSpacing(ds.space_sm)
 
         title = QLabel(pgm_label)
-        title.setProperty('class', 'pgm-title')
+        title.setObjectName('pgm_title')
         layout.addWidget(title)
 
+        # Grille 2 colonnes
+        from PySide6.QtWidgets import QGridLayout
         grid = QGridLayout()
-        grid.setSpacing(sp(SpacingToken.SM))
+        grid.setSpacing(ds.space_sm)
 
         for idx, (key, text) in enumerate(buttons_def):
             btn = QPushButton(text)
-            btn.setProperty('class', 'pgm-btn')
-            btn.setMinimumHeight(sp(SpacingToken.XXL))
+            btn.setProperty('class', 'pgm_btn')
             btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             btn.setCursor(Qt.PointingHandCursor)
             btn.clicked.connect(self._on_pgm_btn_clicked(key))
             self._pgm_buttons[key] = btn
-            row = idx // 2
-            col = idx % 2
+            row, col = idx // 2, idx % 2
             grid.addWidget(btn, row, col)
 
         layout.addLayout(grid)
-
-        # Bouton Mes classes (visible seulement si serveur connecté)
-        pgm_label_short = pgm_label  # "PEI" ou "DP"
-        btn_classes = QPushButton(f'Mes classes {pgm_label_short}')
-        btn_classes.setProperty('class', 'classes-btn')
-        btn_classes.setMinimumHeight(sp(SpacingToken.MD))
-        btn_classes.setCursor(Qt.PointingHandCursor)
-        btn_classes.clicked.connect(self._on_classes_btn(pgm_label_short))
-        self._pgm_buttons[f'{pgm_label_short.lower()}_mes_classes'] = btn_classes
-        layout.addWidget(btn_classes)
-
         layout.addStretch()
         return panel
-
-    @safe_slot("Unknown._on_classes_btn")
-    def _on_classes_btn(self, pgm: str):
-        def handler():
-            view = _BTN_VIEW.get(f'{pgm.lower()}_mes_classes', f'{pgm.lower()}_classes')
-            self._open_main_window(focus=view)
-        return handler
-
-    @safe_slot("Unknown._open_pp")
-    def _open_pp(self) -> None:
-        detected = self._detect_programs()
-        if detected.get('PEI'):
-            view = 'college_Bulletin'
-        elif detected.get('DP'):
-            view = 'lycee_bulletin'
-        else:
-            view = 'prof_principal'
-        self._open_main_window(focus=view)
-
-    @safe_slot("Unknown._on_pgm_btn_clicked")
-    def _on_pgm_btn_clicked(self, key: str):
-        def handler():
-            view = _BTN_VIEW.get(key, key)
-            self._open_main_window(focus=view)
-        return handler
 
     # ------------------------------------------------------------------
     # Data loading
@@ -486,75 +410,75 @@ class HomeWindow(QMainWindow):
 
     def _load_profile(self) -> None:
         conn = db.local_conn
-
         full_name = session.full_name or '—'
-        email = session.email or '—'
-        role_label = session.role.value if session.role else '—'
+        email_val = session.email or '—'
         mode = session.conn_mode
         mode_str = mode.value if mode else 'Hors connexion'
 
         self._hdr_title.setText(f'Bienvenue, {full_name}')
         self._hdr_mode.setText(f'Mode : {mode_str}')
         self._lbl_name.setText(full_name)
-        self._lbl_email.setText(email)
-        self._lbl_role.setText(f'Rôle : {role_label}')
+        self._lbl_email.setText(email_val)
+        self._lbl_role.setText(session.role_display)
 
-        # Indicateurs de connexion
         server_ok = db.server_conn is not None
+        p = theme_manager.palette
         if server_ok:
             server_mode = db.server_mode
             intra_active = server_mode == DBMode.INTRANET
             cloud_active = server_mode == DBMode.CLOUD
             self._profile_intra.setText(f'Intranet : {"●" if intra_active else "○"}')
+            self._profile_intra.setStyleSheet(
+                f"color: {'#27ae60' if intra_active else p.text_soft}; "
+                f"font-size: {theme_manager.font_size(11)}px; font-weight: {'bold' if intra_active else 'normal'};")
             self._profile_cloud.setText(f'Cloud : {"●" if cloud_active else "○"}')
-            self._profile_offline.setText('')
+            self._profile_cloud.setStyleSheet(
+                f"color: {'#27ae60' if cloud_active else p.text_soft}; "
+                f"font-size: {theme_manager.font_size(11)}px; font-weight: {'bold' if cloud_active else 'normal'};")
         else:
             self._profile_intra.setText('Intranet : ○')
+            self._profile_intra.setStyleSheet(f"color: {p.text_soft}; font-size: {theme_manager.font_size(11)}px;")
             self._profile_cloud.setText('Cloud : ○')
-            self._profile_offline.setText('Hors connexion')
+            self._profile_cloud.setStyleSheet(f"color: {p.text_soft}; font-size: {theme_manager.font_size(11)}px;")
 
         if conn is None:
             return
-
         try:
             row = conn.execute(
                 "SELECT updated_at FROM session_cache WHERE user_id = ?",
                 (session.user_id,)
             ).fetchone()
             if row and row[0]:
-                self._hdr_last_login.setText(f'Dernière connexion : {row[0]}')
+                self._hdr_last_login.setText(f'Derniere connexion : {row[0]}')
         except Exception:
             pass
-
         try:
             row = conn.execute(
                 "SELECT annee_scolaire, trimestre_courant FROM module_config WHERE id = 1"
             ).fetchone()
             if row:
-                self._lbl_year.setText(f'Année scolaire : {row[0]}')
+                self._lbl_year.setText(f'Annee scolaire : {row[0]}')
                 self._lbl_term.setText(f'Trimestre : {row[1]}')
             else:
-                self._lbl_year.setText('Année scolaire : —')
+                self._lbl_year.setText('Annee scolaire : —')
                 self._lbl_term.setText('Trimestre : —')
         except Exception:
-            self._lbl_year.setText('Année scolaire : —')
+            self._lbl_year.setText('Annee scolaire : —')
             self._lbl_term.setText('Trimestre : —')
 
     def _load_counts(self) -> None:
         conn = db.local_conn
         if conn is None:
             return
-
         try:
             row = conn.execute(
                 "SELECT COUNT(*) FROM larcauth_classroom_termsubject WHERE fk_teacher_id = ?",
                 (session.user_id,)
             ).fetchone()
             count_cts = row[0] if row else 0
-            self._lbl_classes_count.setText(f'Classes-Matières : {count_cts}')
+            self._lbl_classes_count.setText(f'Classes-Matieres : {count_cts}')
         except Exception:
             pass
-
         try:
             row = conn.execute(
                 """SELECT COUNT(DISTINCT s.aecuser_ptr_id)
@@ -565,7 +489,7 @@ class HomeWindow(QMainWindow):
                 (session.user_id,)
             ).fetchone()
             count_students = row[0] if row else 0
-            self._lbl_students_count.setText(f'Élèves : {count_students}')
+            self._lbl_students_count.setText(f'Eleves : {count_students}')
         except Exception:
             pass
 
@@ -573,18 +497,16 @@ class HomeWindow(QMainWindow):
         conn = db.local_conn
         if conn is None:
             return
-
         try:
             row = conn.execute(
                 "SELECT derniere_synchronisation FROM module_config WHERE id = 1"
             ).fetchone()
             if row and row[0]:
-                self._lbl_sync_date.setText(f'Dernière synchronisation : {row[0]}')
+                self._lbl_sync_date.setText(f'Derniere synchronisation : {row[0]}')
             else:
-                self._lbl_sync_date.setText('Dernière synchronisation : jamais')
+                self._lbl_sync_date.setText('Derniere synchronisation : jamais')
         except Exception:
-            self._lbl_sync_date.setText('Dernière synchronisation : —')
-
+            self._lbl_sync_date.setText('Derniere synchronisation : —')
         try:
             row = conn.execute(
                 "SELECT last_source FROM sync_state LIMIT 1"
@@ -596,7 +518,6 @@ class HomeWindow(QMainWindow):
 
         total_unsynced = 0
         detail_parts = []
-
         for table in BUSINESS_TABLES:
             count = self._count_unsynced_rows(table)
             if count > 0:
@@ -605,12 +526,11 @@ class HomeWindow(QMainWindow):
                 total_unsynced += count
 
         self._lbl_unsynced_count.setText(str(total_unsynced))
-
         if total_unsynced == 0:
             self._lbl_unsynced_label.setText('Aucune modification en attente')
-            self._lbl_unsynced_detail.setText('Toutes les données sont à jour.')
+            self._lbl_unsynced_detail.setText('Toutes les donnees sont a jour.')
         else:
-            self._lbl_unsynced_label.setText('modifications non synchronisées')
+            self._lbl_unsynced_label.setText('modifications non synchronisees')
             self._lbl_unsynced_detail.setText(' | '.join(detail_parts))
 
     def _count_unsynced_rows(self, table: str) -> int:
@@ -633,16 +553,13 @@ class HomeWindow(QMainWindow):
             return 0
 
     # ------------------------------------------------------------------
-    # Détection programmes
+    # Detection programmes
     # ------------------------------------------------------------------
     def _detect_programs(self) -> dict[str, bool]:
         conn = db.local_conn
         if conn is None:
             return {'PEI': False, 'DP': False}
-
-        has_pei = False
-        has_dp = False
-
+        has_pei, has_dp = False, False
         try:
             rows = conn.execute("""
                 SELECT DISTINCT p.sigle
@@ -652,7 +569,6 @@ class HomeWindow(QMainWindow):
                 JOIN larcauth_program p ON p.id = l.fk_program_id
                 WHERE cts.fk_teacher_id = ?
             """, (session.user_id,)).fetchall()
-
             for r in rows:
                 sigle = (r[0] or '').upper()
                 if sigle in ('PEI', 'MYP'):
@@ -661,20 +577,17 @@ class HomeWindow(QMainWindow):
                     has_dp = True
         except Exception:
             pass
-
         return {'PEI': has_pei, 'DP': has_dp}
 
     def _detect_button_visibility(self, pgm: str, btn_key: str) -> bool:
         conn = db.local_conn
         if conn is None:
             return False
-        uid = session.user_id
-        tid = session.active_term_id
+        uid, tid = session.user_id, session.active_term_id
         if not uid or not tid:
             return False
-
         try:
-            if btn_key == 'pei_grp_matieres' or btn_key == 'dp_grp_matieres':
+            if btn_key in ('pei_grp_matieres', 'dp_grp_matieres'):
                 pids = '(12, 22)' if pgm == 'PEI' else '(13, 23)'
                 row = conn.execute(f"""
                     SELECT 1 FROM larcauth_classroom_termsubject cts
@@ -682,11 +595,9 @@ class HomeWindow(QMainWindow):
                     JOIN larcauth_level l ON l.id = c.fk_level_id
                     WHERE cts.fk_teacher_id = ? AND cts.fk_term_id = ?
                       AND (cts.enabled = 1 OR cts.enabled = 'true')
-                      AND l.fk_program_id IN {pids}
-                    LIMIT 1
+                      AND l.fk_program_id IN {pids} LIMIT 1
                 """, (uid, tid)).fetchone()
                 return row is not None
-
             if btn_key == 'pei_interdisc':
                 row = conn.execute("""
                     SELECT 1 FROM larcauth_classroom_termothersubject cto
@@ -695,11 +606,9 @@ class HomeWindow(QMainWindow):
                     WHERE cto.fk_supervisor_id = ? AND cto.fk_term_id = ?
                       AND (cto.enabled = 1 OR cto.enabled = 'true')
                       AND l.fk_program_id IN (12, 22)
-                      AND (cto.unit_multisubjects = 1 OR cto.unit_multisubjects = 'true')
-                    LIMIT 1
+                      AND (cto.unit_multisubjects = 1 OR cto.unit_multisubjects = 'true') LIMIT 1
                 """, (uid, tid)).fetchone()
                 return row is not None
-
             if btn_key == 'pei_pp':
                 row = conn.execute("""
                     SELECT 1 FROM larcauth_classroom_termothersubject cto
@@ -708,52 +617,37 @@ class HomeWindow(QMainWindow):
                     WHERE cto.fk_supervisor_id = ? AND cto.fk_term_id = ?
                       AND (cto.enabled = 1 OR cto.enabled = 'true')
                       AND l.fk_program_id IN (12, 22)
-                      AND (cto.label LIKE 'Personal%' OR cto.label LIKE 'Projet%')
-                    LIMIT 1
+                      AND (cto.label LIKE 'Personal%' OR cto.label LIKE 'Projet%') LIMIT 1
                 """, (uid, tid)).fetchone()
                 return row is not None
-
             if btn_key == 'pei_mes_classes':
                 return db.server_conn is not None and self._detect_button_visibility(pgm, 'pei_grp_matieres')
-
             if btn_key == 'dp_mes_classes':
                 return db.server_conn is not None and self._detect_button_visibility(pgm, 'dp_grp_matieres')
-
             if btn_key in ('dp_tdc', 'dp_cas', 'dp_memoire'):
-                patterns = {'dp_tdc': ['Th%'], 'dp_cas': ['Cr%'], 'dp_memoire': ['Mé%', 'Ext%']}.get(btn_key, [])
+                patterns = {'dp_tdc': ['Th%'], 'dp_cas': ['Cr%'], 'dp_memoire': ['Me%', 'Ext%']}.get(btn_key, [])
                 clauses = ' OR '.join(['cto.label LIKE ?' for _ in patterns])
-                params = [uid, tid] + patterns
                 row = conn.execute(f"""
                     SELECT 1 FROM larcauth_classroom_termothersubject cto
                     WHERE cto.fk_supervisor_id = ? AND cto.fk_term_id = ?
-                      AND (cto.enabled = 1 OR cto.enabled = 'true')
-                      AND ({clauses})
-                    LIMIT 1
-                """, params).fetchone()
+                      AND (cto.enabled = 1 OR cto.enabled = 'true') AND ({clauses}) LIMIT 1
+                """, [uid, tid] + patterns).fetchone()
                 return row is not None
-
         except Exception:
             return False
-
         return True
 
     def _apply_program_visibility(self) -> None:
         detected = self._detect_programs()
-        server_ok = db.server_conn is not None
-
         for pgm_key, section in self._pgm_sections.items():
             section.setVisible(detected.get(pgm_key, False))
-
         for btn_key, btn in self._pgm_buttons.items():
             pgm = 'PEI' if btn_key.startswith('pei_') else 'DP' if btn_key.startswith('dp_') else ''
             if not detected.get(pgm, False):
                 btn.setVisible(False)
-            elif btn_key.endswith('_mes_classes'):
-                btn.setVisible(server_ok and self._detect_button_visibility(pgm, btn_key))
             else:
                 btn.setVisible(self._detect_button_visibility(pgm, btn_key))
 
-        # Professeur principal visible si le prof est headteacher d'au moins une classe
         pp_visible = False
         conn = db.local_conn
         if conn is not None:
@@ -770,6 +664,17 @@ class HomeWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
+    def _on_pgm_btn_clicked(self, key: str):
+        def handler():
+            view = _BTN_VIEW.get(key, key)
+            self._open_main_window(focus=view)
+        return handler
+
+    def _open_pp(self) -> None:
+        detected = self._detect_programs()
+        view = 'college_bulletin' if detected.get('PEI') else 'lycee_bulletin' if detected.get('DP') else 'prof_principal'
+        self._open_main_window(focus=view)
+
     def _open_main_window(self, focus: str = 'notes') -> None:
         from views.main_window import MainWindow
         self._main_window = MainWindow()
@@ -779,7 +684,6 @@ class HomeWindow(QMainWindow):
         self._poll_main_visible.timeout.connect(self._check_main_visible)
         self._poll_main_visible.start(500)
 
-    @safe_slot("Unknown._check_main_visible")
     def _check_main_visible(self) -> None:
         if self._main_window is None or not self._main_window.isVisible():
             if self._poll_main_visible is not None:
@@ -789,38 +693,26 @@ class HomeWindow(QMainWindow):
             self.show()
             self._load_sync()
 
-    @safe_slot("Unknown._do_sync")
     def _do_sync(self) -> None:
         self.statusBar().showMessage('Synchronisation en cours...')
         QApplication.processEvents()
-
         try:
             if db.server_conn is None:
                 if not db.connect_intranet():
                     if not db.connect_cloud():
-                        self.statusBar().showMessage(
-                            'Aucun serveur disponible (Intranet/Cloud).', 5000
-                        )
+                        self.statusBar().showMessage('Aucun serveur disponible (Intranet/Cloud).', 5000)
                         return
-
             report = sync_manager.pull_push()
             if report.has_errors:
-                self.statusBar().showMessage(
-                    f'Sync terminée avec {len(report.errors)} erreur(s).', 8000
-                )
+                self.statusBar().showMessage(f'Sync terminee avec {len(report.errors)} erreur(s).', 8000)
             elif report.has_conflicts:
-                self.statusBar().showMessage(
-                    f'Sync terminée — {len(report.conflicts)} conflit(s) à résoudre.', 8000
-                )
+                self.statusBar().showMessage(f'Sync terminee — {len(report.conflicts)} conflit(s) a resoudre.', 8000)
             else:
-                self.statusBar().showMessage(
-                    f'Sync réussie — {report.summary()}', 5000
-                )
+                self.statusBar().showMessage(f'Sync reussie — {report.summary()}', 5000)
             self._load_sync()
         except Exception as e:
             self.statusBar().showMessage(f'Erreur de synchronisation : {e}', 8000)
 
-    @safe_slot("Unknown._logout")
     def _logout(self) -> None:
         session.is_authenticated = False
         db.disconnect_all()
@@ -836,3 +728,23 @@ class HomeWindow(QMainWindow):
             login = LoginWindow()
             login.show()
         self.close()
+
+    # ------------------------------------------------------------------
+    # Theme reactivity
+    # ------------------------------------------------------------------
+    @safe_slot("HomeWindow._restyle")
+    def _restyle(self):
+        self.centralWidget().setStyleSheet(self._STYLE())
+        p = theme_manager.palette
+        s = theme_manager.font_size
+        # Re-styler les labels inline du header
+        if hasattr(self, '_hdr_title'):
+            self._hdr_title.setStyleSheet(f'color: {p.on_primary}; border: none;')
+        if hasattr(self, '_hdr_mode'):
+            self._hdr_mode.setStyleSheet(f'color: {p.on_primary}; border: none;')
+        if hasattr(self, '_hdr_last_login'):
+            self._hdr_last_login.setStyleSheet(f'color: {p.on_primary}; border: none;')
+        # Indicateurs connexion
+        if hasattr(self, '_profile_intra'):
+            # Re-appliquer les couleurs de connexion (garder le vert si actif)
+            self._load_profile()

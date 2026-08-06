@@ -289,7 +289,7 @@ class _DesignSystem(QObject):
                 background: transparent;
                 border: {self.border_width}px solid {self.p.outline};
                 border-radius: {self.space_xxs}px;
-                padding: {self.sp(SpacingToken.MD)}px;
+                padding: {self.sp(SpacingToken.XXS)}px {self.sp(SpacingToken.XS)}px;
                 color: {self.p.text_strong};
             }}
             QLineEdit:hover {{

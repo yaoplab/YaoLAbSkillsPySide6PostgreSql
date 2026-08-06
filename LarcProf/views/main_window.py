@@ -12,6 +12,7 @@ from PySide6.QtGui import QFont, QColor, QAction, QKeySequence, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -58,6 +59,26 @@ class ColorItem(QTableWidgetItem):
         return super().data(role)
 
 
+def _note_gradient(val: str, cycle: str, default_bg=QColor(255, 255, 255)) -> QColor | None:
+    """Calcule la couleur de fond d'une cellule de note (rouge→vert)."""
+    if not val:
+        return default_bg
+    try:
+        note_val = float(val)
+    except (ValueError, TypeError):
+        return default_bg
+    max_note = 8 if cycle == 'PEI' else 20
+    half = max_note / 2
+    clamped = max(0, min(note_val, max_note))
+    if clamped <= half:
+        t = clamped / half
+        r, g, b = 255, int(100 + 155 * t), int(100 + 155 * t)
+    else:
+        t = (clamped - half) / half
+        r, g, b = int(255 - 155 * t), 255, int(255 - 155 * t)
+    return QColor(r, g, b)
+
+
 class ColorDelegate(QStyledItemDelegate):
     """Delegate: fond depuis UserRole+3, texte centré par-dessus."""
     def paint(self, painter, option, index):
@@ -69,7 +90,7 @@ class ColorDelegate(QStyledItemDelegate):
         if custom_bg:
             painter.fillRect(option.rect, custom_bg)
         else:
-            painter.fillRect(option.rect, QColor(245, 245, 245))
+            painter.fillRect(option.rect, QColor(theme_manager.palette.background))
         painter.restore()
 
         # Sélection
@@ -90,7 +111,7 @@ class ColorDelegate(QStyledItemDelegate):
 
 
 class ClipboardTable(QTableWidget):
-    """QTableWidget avec support Ctrl+C / Ctrl+V (formats Excel)."""
+    """QTableWidget avec support Ctrl+C / Ctrl+V (formats Excel) + menu contextuel."""
 
     def keyPressEvent(self, event):
         if event.matches(QKeySequence.Copy):
@@ -100,6 +121,68 @@ class ClipboardTable(QTableWidget):
             self._paste_clipboard()
             return
         super().keyPressEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Clic droit sur un eleve → actions evenement."""
+        item = self.itemAt(event.pos())
+        if item is None:
+            return
+        row = item.row()
+        # Colonne 0 = nom eleve
+        name_item = self.item(row, 0)
+        if name_item is None:
+            return
+        student_id = name_item.data(Qt.UserRole)
+        student_name = name_item.text()
+        if student_id is None or not student_name:
+            return
+
+        menu = QMenu(self)
+        menu.addAction('Fiche detaillee...', lambda: self._open_student_card(student_id))
+        menu.addSeparator()
+        menu.addAction('Absence', lambda: self._add_event(student_id, student_name, 'absence'))
+        menu.addAction('Retard', lambda: self._add_event(student_id, student_name, 'late'))
+        menu.addAction('Sortie anticipee', lambda: self._add_event(student_id, student_name, 'exit'))
+        menu.addSeparator()
+        menu.addAction('Autre evenement...', lambda: self._add_event(student_id, student_name, None))
+        menu.exec(event.globalPos())
+
+    def _add_event(self, student_id: int, student_name: str, event_type: str | None):
+        from views.event_dialog import EventDialog
+        from common.event_service import EventService
+
+        if event_type is not None:
+            # Creation directe sans dialogue
+            try:
+                from common.session import session
+                EventService.insert_event(
+                    student_id=student_id,
+                    event_type=event_type,
+                    created_by=session.user_id,
+                )
+                self.window().statusBar().showMessage(
+                    f'Evenement enregistre pour {student_name}', 3000
+                )
+            except Exception as e:
+                self.window().statusBar().showMessage(f'Erreur : {e}', 5000)
+        else:
+            # Dialogue pour evenement personnalise
+            dlg = EventDialog(student_name, student_id, self)
+            if dlg.exec() == QDialog.Accepted:
+                self.window().statusBar().showMessage(
+                    f'Evenement enregistre pour {student_name}', 3000
+                )
+
+    def _open_student_card(self, student_id: int) -> None:
+        """Ouvre la fiche detaillee de l'eleve."""
+        if self._current_item is None or self._current_ts_id is None:
+            return
+        from views.student_card_view import StudentCardView
+        item = self._current_item
+        label = f"{item['matiere_label']} - {item['class_label']}"
+        dlg = StudentCardView(self._current_ts_id, label, item['class_id'],
+                              self._current_cycle, self)
+        dlg.exec()
 
     def _copy_selection(self) -> None:
         rows = sorted(set(item.row() for item in self.selectedItems()))
@@ -301,18 +384,28 @@ class MainWindow(QMainWindow):
 
         title_font = QFont('Segoe UI', theme_manager.font_size(14), QFont.Bold)
         meta_font = QFont('Segoe UI', theme_manager.font_size(11))
+        small_font = QFont('Segoe UI', theme_manager.font_size(10))
 
+        # Nom + roles sur deux lignes
+        prof_col = QVBoxLayout()
+        prof_col.setSpacing(ds.space_xxs)
         prof_lbl = QLabel(prof_name)
         prof_lbl.setFont(title_font)
-        annee_lbl = QLabel(f'Année  {annee}')
-        annee_lbl.setFont(meta_font)
-        trim_lbl = QLabel(f'Trimestre  {trim}')
-        trim_lbl.setFont(meta_font)
+        prof_col.addWidget(prof_lbl)
 
-        h.addWidget(prof_lbl)
+        self._roles_lbl = QLabel()
+        self._roles_lbl.setFont(small_font)
+        self._update_roles_label()
+        prof_col.addWidget(self._roles_lbl)
+        h.addLayout(prof_col)
         h.addStretch(1)
+
+        annee_lbl = QLabel(f'Annee  {annee}')
+        annee_lbl.setFont(meta_font)
         h.addWidget(annee_lbl)
         h.addSpacing(ds.space_md)
+        trim_lbl = QLabel(f'Trimestre  {trim}')
+        trim_lbl.setFont(meta_font)
         h.addWidget(trim_lbl)
 
         h.addSpacing(ds.space_sm)
@@ -427,10 +520,13 @@ class MainWindow(QMainWindow):
         self._items_combo.currentIndexChanged.connect(self._on_item_selected)
         v.addWidget(self._items_combo)
 
-        lbl_other = QLabel('Autre Matière - Classe')
-        lbl_other.setFont(QFont('Segoe UI', theme_manager.font_size(9), QFont.Bold))
-        lbl_other.setStyleSheet(f'color: {theme_manager.theme.palette.text_strong};')
-        v.addWidget(lbl_other)
+        # "Autre Matière-Classe" (Projet Personnel, TDC, CAS, Mémoire…)
+        # TODO: implémenter l'édition des notes pour larcauth_learner_has_termothersubject
+        self._lbl_other = QLabel('Autre Matière - Classe')
+        self._lbl_other.setFont(QFont('Segoe UI', theme_manager.font_size(9), QFont.Bold))
+        self._lbl_other.setStyleSheet(f'color: {theme_manager.theme.palette.text_strong};')
+        self._lbl_other.setVisible(False)  # masqué tant que non implémenté
+        v.addWidget(self._lbl_other)
 
         self._items_other_combo = QComboBox()
         self._items_other_combo.setPlaceholderText('Choisir autre matière - classe')
@@ -439,9 +535,22 @@ class MainWindow(QMainWindow):
             f"background: {theme_manager.theme.palette.primary_container};"
         )
         self._items_other_combo.currentIndexChanged.connect(self._on_other_item_selected)
+        self._items_other_combo.setVisible(False)  # masqué tant que non implémenté
         v.addWidget(self._items_other_combo)
 
         v.addSpacing(ds.space_xxs)
+
+        # Bouton Pondération
+        p = theme_manager.palette
+        self._weight_btn = QPushButton('Ponderation')
+        self._weight_btn.setFixedHeight(ds.table_row_min + ds.space_xs)
+        self._weight_btn.setFont(theme_manager.font(theme_manager.theme.fonts.button, QFont.Bold))
+        self._weight_btn.setStyleSheet(
+            f"QPushButton {{ background: {p.primary_container}; color: {p.primary}; border: 1px solid {p.primary}; "
+            f"border-radius: {ds.radius_lg}px; padding: {ds.space_xxs // 2}px {ds.space_xs}px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {p.primary}; color: {p.on_primary}; }}")
+        self._weight_btn.clicked.connect(self._on_weight)
+        v.addWidget(self._weight_btn)
 
         v.addStretch()
         return f
@@ -559,17 +668,19 @@ class MainWindow(QMainWindow):
 
         jgt_btn = QPushButton('Jugement')
         jgt_btn.setCheckable(True)
+        jgt_btn.setChecked(False)
         jgt_btn.setFixedHeight(ds.table_row_min)
         jgt_btn.setFont(theme_manager.font(theme_manager.theme.fonts.button))
-        jgt_btn.setStyleSheet(self._btn_toggle_style(True))
+        jgt_btn.setStyleSheet(self._btn_toggle_style(False))
         jgt_btn.clicked.connect(self._on_jgt_toggle)
         v.addWidget(jgt_btn)
 
         note_btn = QPushButton('Note sur 7')
         note_btn.setCheckable(True)
+        note_btn.setChecked(False)
         note_btn.setFixedHeight(ds.table_row_min)
         note_btn.setFont(theme_manager.font(theme_manager.theme.fonts.button))
-        note_btn.setStyleSheet(self._btn_toggle_style(True))
+        note_btn.setStyleSheet(self._btn_toggle_style(False))
         note_btn.clicked.connect(self._on_jgt_note_toggle)
         v.addWidget(note_btn)
 
@@ -633,6 +744,8 @@ class MainWindow(QMainWindow):
         self._grille.setItemDelegate(ColorDelegate())
 
         self._grille.cellChanged.connect(self._on_cell_changed)
+        self._grille.cellClicked.connect(self._on_cell_clicked)
+        self._grille.cellDoubleClicked.connect(self._on_cell_double_clicked)
 
         h.addWidget(self._grille, 1)
 
@@ -659,7 +772,6 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
-    @safe_slot("Unknown._on_sync")
     def _on_sync(self) -> None:
         """Synchronise avec le serveur, ou sauvegarde locale si hors ligne."""
         print(f'[SYNC] Début — sauvegarde locale...')
@@ -687,7 +799,6 @@ class MainWindow(QMainWindow):
             print(f'[SYNC] Erreur: {e}')
             self.statusBar().showMessage(f'Erreur de synchronisation: {e}')
 
-    @safe_slot("Unknown._on_save_and_quit")
     def _on_save_and_quit(self) -> None:
         """Enregistre les notes, synchronise et quitte."""
         print('[SAVE-QUIT] Sauvegarde locale...')
@@ -711,6 +822,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Data access
     # ------------------------------------------------------------------
+    def _update_roles_label(self):
+        """Met a jour le label des roles dans le header."""
+        roles = session.role_display
+        self._roles_lbl.setText(roles)
+        self._roles_lbl.setStyleSheet(
+            f"color: {theme_manager.theme.palette.on_primary}; border: none;"
+        )
+
     def _read_annee_scolaire(self) -> str:
         conn = db.local_conn
         if conn is None:
@@ -862,13 +981,12 @@ class MainWindow(QMainWindow):
             """, (level_id,)).fetchone()
             if row:
                 sigle = row[0].upper()
-                if sigle in ('DP', 'IBDP', 'DIPLOMA'):
+                if sigle in ('DP', 'IBDP', 'DIPLOMA', 'DPFR', 'DPEN'):
                     return 'DP'
-            return 'PEI'
+            return 'PEI'  # PEI, MYP, et tout le reste
         except Exception:
             return 'PEI'
 
-    @safe_slot("Unknown._on_item_selected")
     def _on_item_selected(self, idx: int) -> None:
         """Item Matière-Classe sélectionné → charge évaluations + grille."""
         class_id = self._items_combo.itemData(idx) if idx >= 0 else None
@@ -1156,21 +1274,18 @@ class MainWindow(QMainWindow):
         self._crit_btns[letter].setStyleSheet(self._btn_crit_style(self._visible_crits[letter]))
         self._on_selection_changed()
 
-    @safe_slot("Unknown._on_jgt_toggle")
     def _on_jgt_toggle(self):
         """Bascule l'affichage des 4 colonnes jugement."""
         checked = self._jwidgets['jgt_btn'].isChecked()
         self._jwidgets['jgt_btn'].setStyleSheet(self._btn_toggle_style(checked))
         self._on_selection_changed()
 
-    @safe_slot("Unknown._on_jgt_note_toggle")
     def _on_jgt_note_toggle(self):
         """Bascule visibilité colonne note sur 7."""
         checked = self._jwidgets['note_btn'].isChecked()
         self._jwidgets['note_btn'].setStyleSheet(self._btn_toggle_style(checked))
         self._on_selection_changed()
 
-    @safe_slot("Unknown._on_jgt_comment_toggle")
     def _on_jgt_comment_toggle(self):
         """Bascule visibilité commentaire jugements."""
         self._show_jgt_comment = not self._show_jgt_comment
@@ -1179,8 +1294,9 @@ class MainWindow(QMainWindow):
         self._on_selection_changed()
 
     def _on_selection_changed(self):
-        """Recharge la grille après un changement de sélection."""
+        """Recharge la grille apres un changement de selection."""
         self._save_grid_edits()
+        self._auto_compute_judgments_and_note()
         if self._current_item is None:
             return
         item = self._current_item
@@ -1209,6 +1325,10 @@ class MainWindow(QMainWindow):
         conn = db.local_conn
         if conn is None:
             return
+
+        # Bloquer les signaux pendant le remplissage
+        self._grille.blockSignals(True)
+        self._dirty_cells.clear()
 
         # --- 1. Déterminer les colonnes à afficher selon les sélections ---
         synth_display = 'note_on_7' if cycle == 'PEI' else 'moy_on_20'
@@ -1258,6 +1378,7 @@ class MainWindow(QMainWindow):
                 visible_db_cols.append(f'jgt_{letter}')
         if self._jwidgets['note_btn'].isChecked():
             visible_db_cols.append(synth_display)
+            visible_db_cols.append('_note_validated')  # colonne virtuelle pour checkbox
         if self._show_jgt_comment:
             visible_db_cols.append('term_observation')
 
@@ -1277,7 +1398,7 @@ class MainWindow(QMainWindow):
                     return e.get('nature', '') or ''
             return ''
 
-        existing_visible = [c for c in visible_db_cols if c in existing_db_cols]
+        existing_visible = [c for c in visible_db_cols if c in existing_db_cols or c == '_note_validated']
 
         # --- 3. Noms d'affichage ---
         display_names = []
@@ -1306,6 +1427,8 @@ class MainWindow(QMainWindow):
                 display_names.append(f'{c[0].upper()} Obs.')
             elif c == 'term_observation':
                 display_names.append('Obs. Terme')
+            elif c == '_note_validated':
+                display_names.append('Valide')
             else:
                 display_names.append(c)
 
@@ -1337,7 +1460,14 @@ class MainWindow(QMainWindow):
                 pass
 
             if has_fk:
-                select_list = ['id', fk_col] + existing_visible
+                # Remplacer _note_validated (virtuel) par note_on_7_checked (reel)
+                select_list = ['id', fk_col]
+                for c in existing_visible:
+                    if c == '_note_validated':
+                        if 'note_on_7_checked' not in select_list:
+                            select_list.append('note_on_7_checked')
+                    else:
+                        select_list.append(c)
                 try:
                     cols_sql = ', '.join(f'"{c}"' for c in select_list)
                     rows = conn.execute(
@@ -1376,6 +1506,21 @@ class MainWindow(QMainWindow):
             # Colonnes 1..N : notes
             eleve_notes = notes.get(eleve['id'], {})
             for ci, db_name in enumerate(existing_visible):
+                if db_name == '_note_validated':
+                    # Colonne virtuelle: indicateur de validation note/7
+                    is_checked = eleve_notes.get('note_on_7_checked', '') in ('1', 'True', 'true', True)
+                    if is_checked:
+                        txt, fg, bg = '✓', QColor('#FFFFFF'), QColor('#2E7D32')  # vert
+                    else:
+                        txt, fg, bg = '!', QColor('#FFFFFF'), QColor('#E65100')  # orange
+                    item = ColorItem(txt, bg)
+                    item.setData(Qt.UserRole, eleve['id'])  # pour le clic: savoir quel eleve
+                    item.setData(Qt.UserRole + 10, '_note_validated')
+                    item.setTextAlignment(Qt.AlignCenter)
+                    item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                    self._grille.setItem(row_idx, ci + 1, item)
+                    continue
+
                 val = eleve_notes.get(db_name, '')
 
                 item_bg: QColor | None = None
@@ -1383,24 +1528,7 @@ class MainWindow(QMainWindow):
                 is_synth = (db_name == synth_display)
                 is_note_col = '_note_' in db_name or is_synth
                 if is_note_col:
-                    if val:
-                        try:
-                            note_val = float(val)
-                        except (ValueError, TypeError):
-                            item_bg = QColor(255, 255, 255)  # blanc si valeur invalide
-                        else:
-                            max_note = 8 if cycle == 'PEI' else 20
-                            half = max_note / 2
-                            clamped = max(0, min(note_val, max_note))
-                            if clamped <= half:
-                                t = clamped / half
-                                r, g, b = 255, int(100 + 155 * t), int(100 + 155 * t)
-                            else:
-                                t = (clamped - half) / half
-                                r, g, b = int(255 - 155 * t), 255, int(255 - 155 * t)
-                            item_bg = QColor(r, g, b)
-                    else:
-                        item_bg = QColor(255, 255, 255)  # blanc si vide
+                    item_bg = _note_gradient(val, cycle)
 
                 item = ColorItem(str(val), item_bg)
                 item.setTextAlignment(Qt.AlignCenter)
@@ -1428,7 +1556,8 @@ class MainWindow(QMainWindow):
                 else:
                     self._grille.setColumnWidth(ci + 1, pei_config.note_width)
 
-    @safe_slot("Unknown._on_cell_changed")
+        self._grille.blockSignals(False)
+
     def _on_cell_changed(self, row: int, col: int) -> None:
         if row < 0 or row >= self._grille.rowCount():
             return
@@ -1443,32 +1572,34 @@ class MainWindow(QMainWindow):
         val = item.text().strip() if item else ''
 
         # Recalculer le gradient pour cette cellule
-        if isinstance(item, ColorItem):
-            is_note_col = '_note_' in db_name or db_name in ('note_on_7', 'moy_on_20')
-            if is_note_col and val:
-                try:
-                    note_val = float(val)
-                except (ValueError, TypeError):
-                    item.set_bg(QColor(255, 255, 255))
-                else:
-                    cycle = self._current_cycle
-                    max_note = 8 if cycle == 'PEI' else 20
-                    half = max_note / 2
-                    clamped = max(0, min(note_val, max_note))
-                    if clamped <= half:
-                        t = clamped / half
-                        r, g, b = 255, int(100 + 155 * t), int(100 + 155 * t)
-                    else:
-                        t = (clamped - half) / half
-                        r, g, b = int(255 - 155 * t), 255, int(255 - 155 * t)
-                    item.set_bg(QColor(r, g, b))
-            elif is_note_col:
-                item.set_bg(QColor(255, 255, 255))
+        if isinstance(item, ColorItem) and ('_note_' in db_name or db_name in ('note_on_7', 'moy_on_20')):
+            item.set_bg(_note_gradient(val, self._current_cycle))
 
         self._dirty_cells[(student_id, db_name)] = val
         self.statusBar().showMessage('Modifications non sauvegardées')
 
-    @safe_slot("Unknown._on_header_section_clicked")
+    def _on_cell_clicked(self, row: int, col: int) -> None:
+        """Gere le clic sur une cellule non-editable : toggle validation note/7."""
+        if col <= 0 or col - 1 >= len(self._current_col_names):
+            return
+        db_name = self._current_col_names[col - 1]
+        if db_name != '_note_validated':
+            return
+        item_name = self._grille.item(row, 0)
+        student_id = item_name.data(Qt.UserRole) if item_name else None
+        if student_id is None:
+            return
+        self._toggle_note_validation(student_id)
+        # Recharger la grille pour voir le changement
+        self._on_selection_changed()
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        """Double-clic sur un eleve → ouvre la fiche detaillee."""
+        item_name = self._grille.item(row, 0)
+        student_id = item_name.data(Qt.UserRole) if item_name else None
+        if student_id is not None:
+            self._open_student_card(student_id)
+
     def _on_header_section_clicked(self, col: int) -> None:
         if col != 0:
             return
@@ -1512,7 +1643,95 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f'Erreur sauvegarde: {e}')
         return saved
 
-    @safe_slot("Unknown._on_other_item_selected")
+    def _auto_compute_judgments_and_note(self) -> None:
+        """Calcule automatiquement les jugements (jgt_a..d) et la note/7
+        pour tous les eleves de la matiere-classe courante.
+        Ne fait rien si pas de termsubject selectionne ou si cycle DP."""
+        if self._current_ts_id is None or not self._current_student_ids:
+            return
+        if self._current_cycle == 'DP':
+            return  # DP: calcul different (a implementer plus tard)
+
+        conn = db.local_conn
+        if conn is None:
+            return
+
+        table = 'larcauth_learnerpei_has_termsubjectpei'
+
+        # Collecter toutes les evaluations actives
+        evals_rows = conn.execute("""
+            SELECT type_evaluation, index_eval, crit_a, crit_b, crit_c, crit_d
+            FROM larcauth_evaluation
+            WHERE fk_classroom_termsubject_id = ? AND CAST(index_eval AS INTEGER) BETWEEN 1 AND 12
+        """, (str(self._current_ts_id),)).fetchall()
+
+        # Par critere: liste de (type, index)
+        evals_by_crit: dict[str, list[tuple[str, int]]] = {'A': [], 'B': [], 'C': [], 'D': []}
+        for r in evals_rows:
+            etype = str(r[0]).strip().upper()
+            idx = int(r[1])
+            for i, crit in enumerate(('A', 'B', 'C', 'D')):
+                if str(r[2 + i]).strip() in ('1', 'TRUE', 'ON'):
+                    evals_by_crit[crit].append((etype, idx))
+
+        for student_id in self._current_student_ids:
+            learner_id = self._row_ids.get(student_id)
+            if learner_id is None:
+                continue
+
+            # Calculer les jugements = moyenne par critere
+            jgt_values = {}
+            for crit in ('A', 'B', 'C', 'D'):
+                vals = []
+                for etype, idx in evals_by_crit[crit]:
+                    col = f"{etype[0].lower()}{idx:02d}_note_{crit.lower()}"
+                    row = conn.execute(
+                        f'SELECT "{col}" FROM "{table}" WHERE id = ?',
+                        (learner_id,)
+                    ).fetchone()
+                    if row and row[0] is not None:
+                        vals.append(float(row[0]))
+                if vals:
+                    jgt_values[crit.lower()] = round(sum(vals) / len(vals))
+
+            # Mettre a jour les jugements en base
+            if jgt_values:
+                cols = ', '.join(f'"{f"jgt_{k}"}" = ?' for k in jgt_values)
+                params = list(jgt_values.values()) + [learner_id]
+                conn.execute(f'UPDATE "{table}" SET {cols} WHERE id = ?', params)
+
+            # Calculer la note/7 via CalcEngine
+            from common.calc_engine import CalcEngine
+            note = CalcEngine.compute_note(student_id, self._current_ts_id)
+            if note is not None:
+                conn.execute(
+                    f'UPDATE "{table}" SET note_on_7 = ? WHERE id = ?',
+                    (note, learner_id)
+                )
+
+        conn.commit()
+
+    def _toggle_note_validation(self, student_id: int) -> None:
+        """Bascule la validation note_on_7_checked pour un eleve."""
+        conn = db.local_conn
+        if conn is None or self._current_ts_id is None:
+            return
+        table = ('larcauth_learnerpei_has_termsubjectpei' if self._current_cycle == 'PEI'
+                 else 'larcauth_learnerdp_has_termsubjectdp')
+        learner_id = self._row_ids.get(student_id)
+        if learner_id is None:
+            return
+        row = conn.execute(
+            f'SELECT note_on_7_checked FROM "{table}" WHERE id = ?',
+            (learner_id,)
+        ).fetchone()
+        current = bool(row and row[0])
+        conn.execute(
+            f'UPDATE "{table}" SET note_on_7_checked = ? WHERE id = ?',
+            (not current, learner_id)
+        )
+        conn.commit()
+
     def _on_other_item_selected(self, idx: int) -> None:
         """Item Autre Matière-Classe sélectionné."""
         termother_id = self._items_other_combo.itemData(idx) if idx >= 0 else None
@@ -1535,11 +1754,24 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Manager windows
     # ------------------------------------------------------------------
-    @safe_slot("Unknown._open_manager_f")
+    def _on_weight(self):
+        """Ouvre le dialogue de ponderation pour la matiere selectionnee."""
+        if self._current_ts_id is None:
+            self.statusBar().showMessage('Selectionnez d\'abord une matiere-classe')
+            return
+        from views.weight_dialog import WeightDialog
+        slot_label = ''
+        for item in self._items:
+            if item['termsubject_id'] == self._current_ts_id:
+                slot_label = f"{item['matiere_label']} - {item['class_label']}"
+                break
+        dlg = WeightDialog(self._current_ts_id, slot_label, self)
+        if dlg.exec() == QDialog.Accepted:
+            self.statusBar().showMessage('Ponderation enregistree', 3000)
+
     def _open_manager_f(self):
         self._open_manager('F')
 
-    @safe_slot("Unknown._open_manager_s")
     def _open_manager_s(self):
         self._open_manager('S')
 

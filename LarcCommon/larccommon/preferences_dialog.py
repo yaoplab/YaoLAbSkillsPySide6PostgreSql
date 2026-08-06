@@ -166,12 +166,12 @@ class PreferencesDialog(M3Dialog):
             except Exception:
                 pass
 
-    @safe_slot("Unknown._on_ok")
+    @safe_slot("PreferencesDialog._on_ok")
     def _on_ok(self):
         self._apply()
         self.accept()
 
-    @safe_slot("Unknown._on_cancel")
+    @safe_slot("PreferencesDialog._on_cancel")
     def _on_cancel(self):
         session.fk_language = self._orig_lang
         session.theme_pref = self._orig_theme

@@ -1,19 +1,20 @@
 from phibuilder.widgets import M3Button, M3Label, M3StackedWidget
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
+    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QScrollArea,
 )
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFont, QIcon
 
 from larccommon.session import session
 from larccommon.database import db, DBMode
 from larccommon.design_system import ds
 from larccommon.theme import theme_manager
+from larccommon.icons import icon as md3_icon
 from larccommon.safe_slot import safe_slot
 
 
 class _SectionButton(QPushButton):
-    def __init__(self, label: str, parent=None):
+    def __init__(self, label: str, icon_name: str | None = None, parent=None):
         super().__init__(label, parent)
         self.setCheckable(True)
         self.setFixedHeight(theme_manager.image.theme_btn)
@@ -21,6 +22,11 @@ class _SectionButton(QPushButton):
         font = QFont()
         font.setPointSize(10)
         self.setFont(font)
+        if icon_name:
+            try:
+                self.setIcon(md3_icon(icon_name, color=theme_manager.palette.text_strong, size=18))
+            except Exception:
+                pass
 
     def set_state(self, enabled: bool, visible: bool):
         self.setVisible(visible)
@@ -131,7 +137,16 @@ class HubWindow(QWidget):
             'SECR': 'Secrétaire',
             'PROF': 'Enseignant',
         }
-        self._role_label = M3Label(role_names.get(session.role.value, session.role.value))
+        # Afficher tous les rôles actifs (multi-rôle)
+        tf = getattr(session, 'type_flags', {}) or {}
+        active_roles = []
+        if tf.get('director'):   active_roles.append('Directeur')
+        if tf.get('coordinator'): active_roles.append('Coordinateur')
+        if tf.get('supervisor'):  active_roles.append('Superviseur')
+        if tf.get('secretary'):   active_roles.append('Secrétaire')
+        if tf.get('teacher'):     active_roles.append('Enseignant')
+        role_text = ' | '.join(active_roles) if active_roles else role_names.get(session.role.value, session.role.value)
+        self._role_label = M3Label(role_text)
         self._role_label.setStyleSheet(f"""
             font-size: {theme_manager.font_size(10)}px; color: {theme_manager.palette.text_strong};
             padding: 0 5px 8px 5px;
@@ -149,7 +164,14 @@ class HubWindow(QWidget):
         sb_layout.addLayout(self._btn_layout)
         sb_layout.addStretch()
 
-        layout.addWidget(self._sidebar)
+        # Wrap sidebar in a scroll area for multi-level navigation
+        self._sidebar_scroll = QScrollArea()
+        self._sidebar_scroll.setWidgetResizable(True)
+        self._sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._sidebar_scroll.setFrameShape(QScrollArea.NoFrame)
+        self._sidebar_scroll.setWidget(self._sidebar)
+        self._sidebar_scroll.setFixedWidth(self.SIDEBAR_EXPANDED)
+        layout.addWidget(self._sidebar_scroll)
 
         # Toggle button — always visible, between sidebar and content
         self._toggle_btn = M3Button("◀")
@@ -195,11 +217,11 @@ class HubWindow(QWidget):
 
         layout.addWidget(self._content, 1)
 
-    @safe_slot("Unknown._toggle_sidebar")
+    @safe_slot("HubWindow._toggle_sidebar")
     def _toggle_sidebar(self):
         self._sidebar_expanded = not self._sidebar_expanded
         w = self.SIDEBAR_EXPANDED if self._sidebar_expanded else 0
-        self._sidebar.setFixedWidth(w)
+        self._sidebar_scroll.setFixedWidth(w)
         self._toggle_btn.setText("▶" if not self._sidebar_expanded else "◀")
 
     def _build_sections(self):
@@ -208,17 +230,35 @@ class HubWindow(QWidget):
         conn_ok = db.is_server_connected
         tf = getattr(session, 'type_flags', {}) or {}
 
+        section_icons = {
+            'supervision': 'visibility',
+            'secretariat': 'description',
+            'config': 'settings',
+            'bulletin': 'subject',
+            'rh': 'person',
+            'compta': 'check',
+        }
+
         has_supervision = tf.get('supervisor') or tf.get('coordinator') or tf.get('director')
         sections.append(('supervision', 'Supervision', has_supervision, conn_ok))
 
         has_secretariat = tf.get('secretary') or tf.get('director')
         sections.append(('secretariat', 'Secrétariat', has_secretariat, conn_ok))
 
-        has_coordination = tf.get('coordinator') or tf.get('director')
-        sections.append(('coordination', 'Coordination', has_coordination, False))
+        has_config = tf.get('director') or tf.get('coordinator')
+        sections.append(('config', 'Configuration', has_config, False))
+
+        has_bulletin = tf.get('secretary') or tf.get('director') or tf.get('coordinator')
+        sections.append(('bulletin', 'Bulletins', has_bulletin, False))
+
+        has_rh = tf.get('director') or tf.get('secretary')
+        sections.append(('rh', 'Ress. Humaines', has_rh, False))
+
+        has_compta = tf.get('director') or tf.get('secretary')
+        sections.append(('compta', 'Comptabilite', has_compta, False))
 
         for key, label, has_role, enabled in sections:
-            btn = _SectionButton(label)
+            btn = _SectionButton(label, icon_name=section_icons.get(key))
             btn.clicked.connect(lambda checked, k=key: self._switch_to(k))
             btn.set_state(enabled=enabled and has_role, visible=has_role)
             if not enabled and has_role:
@@ -304,7 +344,6 @@ class HubWindow(QWidget):
             self._stack.insertWidget(idx, lbl)
             info['page'] = lbl
 
-    @safe_slot("Unknown._check_connections")
     def _check_connections(self):
         conn_ok = db.is_server_connected
         for key, info in self._sections.items():

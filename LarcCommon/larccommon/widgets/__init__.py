@@ -14,12 +14,14 @@ from larccommon.widgets.file_resolver import FileResolver
 from larccommon.widgets.file_viewer import FileViewer
 from larccommon.widgets.nav_button import NavButton
 from larccommon.widgets.sidebar import SidebarWidget
+from larccommon.widgets.skeleton import M3Skeleton
 from larccommon.widgets.themed_widget import ThemedWidget, ThemedDialog
 from larccommon.widgets.table_settings import TableSettings
 
 __all__ = [
     "NavButton",
     "SidebarWidget",
+    "M3Skeleton",
     "ThemedWidget",
     "ThemedDialog",
     "CardConfig",

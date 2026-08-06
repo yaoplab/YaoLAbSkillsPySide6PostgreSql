@@ -13,11 +13,13 @@ for _pkg in ('LarcCommon', 'LarcSuperviseur', 'LarcSecretaire'):
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
+from larccommon.safe_slot import set_debug
 
 from LarcHub.views.login import LoginWindow
 
 
 def main() -> None:
+    set_debug(True)  # Dev: affiche les erreurs dans les slots
     app = QApplication(sys.argv)
     app.setApplicationName('LarcHub')
     app.setOrganizationName('Arc-en-Ciel')

@@ -49,11 +49,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Force UTF-8 (Windows cp1252 fix)
-if hasattr(sys.stdout, 'buffer'):
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-if hasattr(sys.stderr, 'buffer'):
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+# Force UTF-8 (Windows cp1252 fix) — appliqué dans main() uniquement
+# pour éviter un double wrapping du sys.stdout/stderr
 
 
 # ── Configuration ─────────────────────────────────────────────────────────────

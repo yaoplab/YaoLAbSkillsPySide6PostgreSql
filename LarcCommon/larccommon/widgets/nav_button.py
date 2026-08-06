@@ -26,12 +26,13 @@ from phibuilder.widgets.button import ButtonVariant, M3Button
 
 
 class NavButton(M3Button):
-    """Bouton de navigation avec icône standardisée.
+    """Bouton de navigation avec icone standardisee.
 
-    Hérite de M3Button(variant=TONAL) et ajoute :
-    - Icône Material Design avec taille et couleur standardisées
-    - Curseur 'main' par défaut (via M3Button)
+    Herite de M3Button et ajoute :
+    - Icone Material Design avec taille et couleur standardisees
+    - Curseur 'main' par defaut (via M3Button)
     - API concise : text + icon_name + on_click
+    - Variant parametrable (defaut: TONAL)
     """
 
     def __init__(
@@ -39,9 +40,10 @@ class NavButton(M3Button):
         text: str = "",
         icon_name: str = "",
         on_click: Optional[Callable] = None,
+        variant: ButtonVariant = ButtonVariant.TONAL,
         parent: Optional[QWidget] = None,
     ):
-        super().__init__(text, variant=ButtonVariant.TONAL, parent=parent)
+        super().__init__(text, variant=variant, parent=parent)
 
         if icon_name:
             icon_size = theme_manager.image.icon_btn  # 18px

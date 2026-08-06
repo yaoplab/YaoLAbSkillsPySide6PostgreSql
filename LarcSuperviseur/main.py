@@ -17,10 +17,12 @@ if os.path.isdir(_common_root) and _common_root not in sys.path:
 
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
+from larccommon.safe_slot import set_debug
 from LarcSuperviseur.views.login import LoginWindow
 
 
 def main() -> None:
+    set_debug(True)  # Dev: affiche les erreurs dans les slots
     app = QApplication(sys.argv)
     app.setApplicationName('LarcSuperviseur')
     app.setOrganizationName('Arc-en-Ciel')

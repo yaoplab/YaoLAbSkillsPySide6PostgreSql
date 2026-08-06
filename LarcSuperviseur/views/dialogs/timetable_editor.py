@@ -133,7 +133,7 @@ class TimetableEditor(M3Dialog):
         for c in range(1, 6):
             self._tt_grid.setColumnWidth(c, 140)
 
-    @safe_slot("Unknown._save")
+    @safe_slot("TimetableEditor._save")
     def _save(self):
         updated = 0
 
