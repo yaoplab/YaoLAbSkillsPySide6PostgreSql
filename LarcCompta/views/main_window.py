@@ -6,7 +6,7 @@ import os
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea, QStackedWidget, QSplitter,
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QStackedWidget,
 )
 
 from larccommon.database import db
@@ -100,7 +100,13 @@ class MainWindow(QWidget):
         self._class_sidebar.group_selected.connect(self._on_group_selected)
         self._class_sidebar.class_selected.connect(lambda cid, label: self._on_class_clicked(cid, label))
         self._class_sidebar.all_selected.connect(self._on_all_clicked)
-        # Pas de max height ni stretch — la sidebar entière défile
+        # Retirer le stretch interne du SidebarWidget (evite le grand blanc sous les classes)
+        _container = self._class_sidebar.widget()  # le widget conteneur du QScrollArea
+        _cl = _container.layout() if _container else None
+        if _cl and _cl.count():
+            _last = _cl.itemAt(_cl.count() - 1)
+            if _last and _last.spacerItem():
+                _cl.takeAt(_cl.count() - 1)
         sb.addWidget(self._class_sidebar)
 
         # Séparateur entre SidebarWidget et NavButtons
@@ -122,29 +128,6 @@ class MainWindow(QWidget):
 
         sb.addStretch()
         self._sidebar = sidebar
-
-        # ── Slider vertical DANS la sidebar (classes ↕ navigation) ──
-        # On sort le SidebarWidget du layout principal et on le met
-        # dans un QSplitter avec le bloc NavButton.
-        sb.removeWidget(self._class_sidebar)
-        sb.removeWidget(sep2)
-        # Reconstruire : SidebarWidget (haut) | NavButtons (bas)
-        nav_bottom = QWidget()
-        nav_bl = QVBoxLayout(nav_bottom)
-        nav_bl.setContentsMargins(0, 0, 0, 0)
-        nav_bl.setSpacing(ds.space_xs)
-        for _, btn in self._nav_buttons.items():
-            nav_bl.addWidget(btn)
-        # Reprendre le sep2
-        nav_bl.insertWidget(0, sep2)
-
-        self._sidebar_splitter = QSplitter(Qt.Vertical)
-        self._sidebar_splitter.setChildrenCollapsible(False)
-        self._sidebar_splitter.addWidget(self._class_sidebar)
-        self._sidebar_splitter.addWidget(nav_bottom)
-        self._sidebar_splitter.setSizes([ds.sidebar_width * 2, ds.sidebar_width])
-        self._sidebar_splitter.setHandleWidth(ds.space_xxs)
-        sb.addWidget(self._sidebar_splitter)
 
         # ── Content ──
         self._stack = QStackedWidget()
@@ -246,8 +229,5 @@ class MainWindow(QWidget):
             self._sidebar.setStyleSheet(
                 f"#sidebar {{ background-color: {p.surface_variant}; }}")
             self._stack.setStyleSheet(f"background: {p.background}; border: none;")
-            if hasattr(self, '_splitter'):
-                self._splitter.setStyleSheet(
-                    f"QSplitter::handle {{ background: {p.border}; }}")
         except RuntimeError:
             pass
