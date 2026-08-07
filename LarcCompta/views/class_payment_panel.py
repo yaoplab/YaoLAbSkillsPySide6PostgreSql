@@ -106,6 +106,11 @@ class ClassPaymentPanel(QWidget):
             card = StudentCard(s["id"], s["last_name"], s["first_name"], DEFAULT_CONFIG)
             card.clicked.connect(lambda sid=s["id"]: self.student_selected.emit(sid))
             card.set_payment_status(s["status"])
+            # Cacher les 4 badges D/M/P/E (spécifique secrétaire, inutile en compta)
+            for j in range(card._badges_row.count()):
+                w = card._badges_row.itemAt(j).widget()
+                if w:
+                    w.hide()
             self._grid_layout.addWidget(card, i // cols, i % cols, Qt.AlignCenter)
 
     def _clear_grid(self):
