@@ -1,8 +1,8 @@
 """Dashboard LarcCompta — KPIs, graphiques, encaissements."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QFont, QPainter, QColor, QPen, QPainterPath
+from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtGui import QFont, QPainter, QColor, QPen
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QFrame, QScrollArea,
@@ -45,20 +45,25 @@ class _BarChart(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
 
+        if h < 60:
+            p.end()
+            return
+
         # Fond
         p.fillRect(0, 0, w, h, QColor(theme_manager.palette.surface))
 
         # Titre
         p.setPen(QColor(theme_manager.palette.text_strong))
-        p.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        p.setFont(QFont("Segoe UI", 10, QFont.Bold))
         p.drawText(12, 22, self._title)
 
-        if not self._data:
+        if not self._data or not self._data[0][2]:
+            p.end()
             return
 
         n = len(self._data)
         bar_w = max(20, min(80, (w - 80) // n - 10))
-        chart_h = h - 60
+        chart_h = max(1, h - 60)
         x0 = 60
         y0 = h - 30
         max_val = max(v[2] for v in self._data) or 1
@@ -82,20 +87,16 @@ class _BarChart(QWidget):
             bar_h_val = int((val / max_val) * chart_h) if max_val > 0 else 0
             bar_h_max = int((_max / max_val) * chart_h) if max_val > 0 else 0
 
-            # Barre attendu (fond gris)
             if _max > val:
                 p.fillRect(x, y0 - bar_h_max, bar_w, bar_h_max,
                            QColor(theme_manager.palette.outline_variant))
-            # Barre encaisse (couleur)
             if bar_h_val > 0:
                 p.fillRect(x, y0 - bar_h_val, bar_w, bar_h_val, colors[i % len(colors)])
 
-            # Label
             p.setPen(QColor(theme_manager.palette.text_strong))
             p.setFont(QFont("Segoe UI", 8))
             p.drawText(x - 5, y0 + 14, bar_w + 10, 16, Qt.AlignCenter, label[:10])
 
-            # Montant
             p.setFont(QFont("Segoe UI", 7, QFont.Bold))
             p.drawText(x - 5, y0 - bar_h_max - 16, bar_w + 10, 14,
                        Qt.AlignCenter, _fmt_fcfa(val))

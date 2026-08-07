@@ -77,6 +77,8 @@ class MainWindow(QWidget):
         nav_items = [
             ("dashboard", "Tableau de bord", "home"),
             ("payments",   "Paiements",      "check"),
+            ("parents",    "Parents",         "person"),
+            ("students",   "Eleves",          "school"),
             ("rappels",    "Rappels",         "schedule"),
         ]
         self._buttons: dict[str, QPushButton] = {}
@@ -124,6 +126,12 @@ class MainWindow(QWidget):
             elif key == "payments":
                 from LarcCompta.views.payment_list import PaymentList
                 self._pages[key] = PaymentList()
+            elif key == "parents":
+                from LarcCompta.views.parents_list import ParentsList
+                self._pages[key] = ParentsList()
+            elif key == "students":
+                from LarcCompta.views.students_list import StudentsList
+                self._pages[key] = StudentsList()
             elif key == "rappels":
                 from LarcCompta.views.reminders import ReminderPanel
                 self._pages[key] = ReminderPanel()
