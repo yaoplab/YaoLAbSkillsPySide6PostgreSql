@@ -233,24 +233,25 @@ class StudentForm(ThemedWidget):
         dp_layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
         dp_layout.setSpacing(ds.space_md)
 
-        # Photo + badges
+        # Photo + Badges + Identité — Q22
         info_row = QHBoxLayout()
-        info_row.setSpacing(ds.space_sm)
+        info_row.setSpacing(ds.space_md)
 
+        # Photo — Q22a
         self._detail_photo = QLabel()
-        self._pw, self._ph = ds.sp(SpacingToken.XXXL) + ds.sp(SpacingToken.MD), ds.sp(SpacingToken.XXXL)
-        self._detail_photo.setFixedSize(self._pw, self._ph)
-        self._detail_photo.setStyleSheet(f"background: {p.primary_container}; border-radius: {ds.radius_sm}px;")
+        self._detail_photo.setFixedSize(ds.icon_lg, ds.icon_lg)  # 52×52
+        self._detail_photo.setStyleSheet(
+            f"background: {p.primary_container}; border-radius: {ds.radius_sm}px;")
         self._detail_photo.setAlignment(Qt.AlignCenter)
         self._detail_photo.setCursor(Qt.PointingHandCursor)
         self._detail_photo.setToolTip(_("student_form.open_file"))
         self._detail_photo.installEventFilter(self)
         info_row.addWidget(self._detail_photo)
 
-        # Badges D/M/P/E
+        # Badges D/M/P/E (spécifique LarcSecretaire)
         self._detail_badges: dict[str, QLabel] = {}
         badges_layout = QVBoxLayout()
-        badges_layout.setSpacing(3)
+        badges_layout.setSpacing(ds.space_xxs - 1)
         _badge_size = 24
         for badge_key, letter, tooltip in [
             ("dossier_valid", "D", _("student_form.badge_dossier")),
@@ -270,28 +271,24 @@ class StudentForm(ThemedWidget):
             self._detail_badges[badge_key] = circle
         info_row.addLayout(badges_layout)
 
-        # Infos texte
+        # Identité — Q22b, Q22c, Q22d, Q22e, Q22f
+        s = theme_manager.font_size
         text_col = QVBoxLayout()
-        text_col.setSpacing(ds.space_xxs)
-        name_row = QHBoxLayout()
-        name_row.setSpacing(ds.space_sm)
-        self._detail_prenom_label = M3Label("—", style="headline_large")
-        self._detail_prenom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
-        name_row.addWidget(self._detail_prenom_label)
-        self._detail_nom_label = M3Label("", style="title_large")
-        self._detail_nom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
-        name_row.addWidget(self._detail_nom_label)
-        name_row.addStretch()
-        text_col.addLayout(name_row)
+        text_col.setSpacing(ds.space_xxs)  # 4px — Q22f
+
+        self._detail_nom_lbl = M3Label("—")
+        self._detail_nom_lbl.setStyleSheet(
+            f"font-size: {s(18)}px; font-weight: bold; color: {p.text_strong}; border: none;")
+        text_col.addWidget(self._detail_nom_lbl)  # Q22c
+
         self._detail_classe_label = M3Label("", style="body_medium")
-        self._detail_classe_label.setStyleSheet(f"color: {p.text_strong};")
-        text_col.addWidget(self._detail_classe_label)
-        self._detail_naissance_label = M3Label("", style="body_medium")
-        self._detail_naissance_label.setStyleSheet(f"color: {p.text_strong};")
-        text_col.addWidget(self._detail_naissance_label)
+        self._detail_classe_label.setStyleSheet(f"color: {p.text_soft};")
+        text_col.addWidget(self._detail_classe_label)  # Q22d
+
         self._detail_id_label = M3Label("", style="body_medium")
-        self._detail_id_label.setStyleSheet(f"color: {p.text_strong};")
-        text_col.addWidget(self._detail_id_label)
+        self._detail_id_label.setStyleSheet(f"color: {p.text_soft};")
+        text_col.addWidget(self._detail_id_label)  # Q22e
+
         text_col.addStretch()
         info_row.addLayout(text_col, 1)
         dp_layout.addLayout(info_row)
@@ -317,14 +314,13 @@ class StudentForm(ThemedWidget):
             self._detail_photo.setStyleSheet(f"background: {p.primary_container}; border-radius: {ds.radius_sm}px;")
         if hasattr(self, "_empty_state_label") and self._empty_state_label:
             self._empty_state_label.setStyleSheet(f"color: {p.text_disabled};")
-        for lbl_attr in ("_detail_prenom_label", "_detail_nom_label", "_detail_classe_label",
-                         "_detail_naissance_label", "_detail_id_label"):
+        for lbl_attr in ("_detail_nom_lbl", "_detail_classe_label", "_detail_id_label"):
             lbl = getattr(self, lbl_attr, None)
             if lbl:
                 lbl.setStyleSheet(f"color: {p.text_strong};")
-        if hasattr(self, "_detail_prenom_label"):
-            self._detail_prenom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
-            self._detail_nom_label.setStyleSheet(f"font-weight: bold; color: {p.text_strong};")
+        if hasattr(self, "_detail_nom_lbl"):
+            self._detail_nom_lbl.setStyleSheet(
+                f"font-size: {theme_manager.font_size(18)}px; font-weight: bold; color: {p.text_strong}; border: none;")
         if hasattr(self, "_inp_nom") and self._inp_nom:
             self._inp_nom.setStyleSheet(ds.flat_input_qss())
         if hasattr(self, "_inp_prenom") and self._inp_prenom:
@@ -444,20 +440,21 @@ class StudentForm(ThemedWidget):
         self._detail_panel.show()
 
     def _update_info_card(self, data: dict):
-        """Met a jour la vignette info."""
+        """Met a jour la vignette info — Q22."""
         sid = data["id"]
         px = QPixmap(get_photo_path(sid))
         if px.isNull():
-            px = _make_avatar(data.get("last_name", ""), data.get("first_name", ""), 160)
+            px = _make_avatar(data.get("last_name", ""), data.get("first_name", ""), ds.icon_lg)
         else:
-            px = px.scaled(self._pw, self._ph, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            px = px.scaled(ds.icon_lg, ds.icon_lg, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._detail_photo.setPixmap(px)
-        self._detail_prenom_label.setText(data.get("first_name", "") or "")
-        self._detail_nom_label.setText((data.get("last_name", "") or "").upper())
+        # Q22c — Nom (prénom + nom)
+        fn = data.get("first_name", "") or ""
+        ln = data.get("last_name", "") or ""
+        self._detail_nom_lbl.setText(f"{fn} {ln}" if fn else "—")
+        # Q22d — Classe
         self._detail_classe_label.setText(_("student_form.class_label").format(label=data.get("classroom", "—")))
-        naissance = data.get("date_of_birth")
-        naissance_str = str(naissance)[:10] if naissance else "—"
-        self._detail_naissance_label.setText(_("student_form.birth_label").format(date=naissance_str))
+        # Q22e — ID
         self._detail_id_label.setText(_("student_form.id_label").format(id=sid))
         self._refresh_detail_badges(sid)
 

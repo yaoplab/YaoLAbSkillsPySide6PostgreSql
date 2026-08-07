@@ -45,44 +45,41 @@ class StaffDetail(QWidget):
             back.clicked.connect(self._on_back)
             layout.addWidget(back)
 
-        # Photo + Infos
+        # Photo + Identité — Q22 (photo gauche, texte aligné contre photo)
         top_row = QHBoxLayout()
         top_row.setSpacing(ds.space_md)
 
-        # Photo
+        # Photo — Q22a
         photo_id = self._staff.get("id", 0)
         photo_path = os.path.normpath(
             os.path.join(os.path.dirname(__file__), "..", "..",
                          "LarcSuperviseur", "photos", f"{photo_id}.png"))
         photo = QLabel()
-        photo.setFixedSize(ds.space_xxxl, ds.space_xxxl)  # 136px Fibonacci
+        photo.setFixedSize(ds.icon_lg, ds.icon_lg)  # 52×52 — Q22a
         photo.setAlignment(Qt.AlignCenter)
         pix = QPixmap(photo_path) if os.path.exists(photo_path) else None
         if pix is None or pix.isNull():
             from LarcRH.views.staff_grid import _make_avatar
-            pix = _make_avatar(self._staff.get("full_name", ""), ds.space_xxxl)
+            pix = _make_avatar(self._staff.get("full_name", ""), ds.icon_lg)
         else:
-            pix = pix.scaled(ds.space_xxxl, ds.space_xxxl, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pix = pix.scaled(ds.icon_lg, ds.icon_lg, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         photo.setPixmap(pix)
-        photo.setStyleSheet(f"border-radius: {ds.space_xxxl // 2}px;")
+        photo.setStyleSheet(
+            f"border-radius: {ds.radius_sm}px; background: {theme_manager.palette.primary_container};")
         top_row.addWidget(photo)
 
-        # Infos
-        info = QVBoxLayout()
-        info.setSpacing(ds.space_xs)
+        # Identité — Q22b (aligné à gauche, contre la photo), Q22f (spacing 4px)
+        s = theme_manager.font_size
+        p = theme_manager.palette
+        identity = QVBoxLayout()
+        identity.setSpacing(ds.space_xxs)  # 4px — Q22f
 
         name_lbl = QLabel(self._staff.get("full_name", "—"))
-        name_lbl.setStyleSheet(f"""
-            font-size: {theme_manager.font_size(18)}px; font-weight: bold;
-            color: {theme_manager.palette.text_strong};
-        """)
-        info.addWidget(name_lbl)
+        name_lbl.setStyleSheet(
+            f"font-size: {s(18)}px; font-weight: bold; color: {p.text_strong}; border: none;")
+        identity.addWidget(name_lbl)  # Q22c — nom en premier
 
-        email_lbl = QLabel(self._staff.get("email", ""))
-        email_lbl.setStyleSheet(f"font-size: {theme_manager.font_size(13)}px; color: {theme_manager.palette.text_soft};")
-        info.addWidget(email_lbl)
-
-        # Rôles
+        # Poste / rôles — Q22d
         if self._staff.get("is_staff"):
             staff_roles = {
                 'type_DRH': 'DRH', 'type_Comptable': 'Comptable',
@@ -97,14 +94,18 @@ class StaffDetail(QWidget):
             if self._staff.get("is_adm"): roles.append("Administrateur")
         role_text = " · ".join(roles) if roles else "Rôle non défini"
         role_lbl = QLabel(role_text)
-        role_lbl.setStyleSheet(f"""
-            font-size: {theme_manager.font_size(12)}px;
-            color: {theme_manager.palette.primary}; font-weight: bold;
-        """)
-        info.addWidget(role_lbl)
+        role_lbl.setStyleSheet(
+            f"font-size: {s(ds.font_label_lg)}px; color: {p.text_soft}; border: none;")
+        identity.addWidget(role_lbl)  # Q22d
 
-        info.addStretch()
-        top_row.addLayout(info, 1)
+        # ID — Q22e
+        id_lbl = QLabel(f"ID : {self._staff.get('id', '—')}")
+        id_lbl.setStyleSheet(
+            f"font-size: {s(ds.font_label_sm)}px; color: {p.text_soft}; border: none;")
+        identity.addWidget(id_lbl)  # Q22e
+
+        top_row.addLayout(identity, 1)
+        top_row.addStretch()
 
         layout.addLayout(top_row)
 

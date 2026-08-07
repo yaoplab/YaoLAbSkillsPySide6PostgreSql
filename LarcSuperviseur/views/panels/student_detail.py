@@ -69,9 +69,6 @@ class StudentDetail(ThemedWidget):
                 background: {p.primary_container};
                 border-radius: {ds.radius_sm}px;
             }}
-            M3Label#sd_header {{
-                font-size: {s(21)}px; font-weight: bold; color: {p.text_strong};
-            }}
             QFrame#kpi_small {{
                 background: {p.surface_variant};
                 border-radius: {ds.radius_sm}px;
@@ -131,23 +128,43 @@ class StudentDetail(ThemedWidget):
         sd_layout.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)
         sd_layout.setSpacing(ds.space_xs)
 
-        # ── Header: photo + nom + KPIs + add event ──
-        hdr = QHBoxLayout()
-        hdr.setSpacing(ds.space_xs)
+        # ── Header Q22: photo + nom/classe/ID + KPIs + add event ──
+        p = theme_manager.palette
+        s = theme_manager.font_size
 
+        hdr = QHBoxLayout()
+        hdr.setSpacing(ds.space_md)
+
+        # Photo — Q22a
         self._sd_photo = QLabel()
         self._sd_photo.setObjectName("sd_photo")
-        self._sd_photo.setFixedSize(theme_manager.image.logo, theme_manager.image.logo)
+        self._sd_photo.setFixedSize(ds.icon_lg, ds.icon_lg)  # 52×52
         self._sd_photo.setAlignment(Qt.AlignCenter)
         hdr.addWidget(self._sd_photo)
 
-        self._sd_header = M3Label()
-        self._sd_header.setObjectName("sd_header")
-        hdr.addWidget(self._sd_header, 1)
+        # Identité — Q22b, Q22f
+        identity = QVBoxLayout()
+        identity.setSpacing(ds.space_xxs)  # 4px — Q22f
+
+        self._sd_name_lbl = QLabel("—")
+        self._sd_name_lbl.setStyleSheet(
+            f"font-size: {s(18)}px; font-weight: bold; color: {p.text_strong}; border: none;")
+        identity.addWidget(self._sd_name_lbl)  # Q22c
+
+        self._sd_class_lbl = QLabel("—")
+        self._sd_class_lbl.setStyleSheet(
+            f"font-size: {s(ds.font_label_lg)}px; color: {p.text_soft}; border: none;")
+        identity.addWidget(self._sd_class_lbl)  # Q22d
+
+        self._sd_id_lbl = QLabel("—")
+        self._sd_id_lbl.setStyleSheet(
+            f"font-size: {s(ds.font_label_sm)}px; color: {p.text_soft}; border: none;")
+        identity.addWidget(self._sd_id_lbl)  # Q22e
+
+        hdr.addLayout(identity, 1)
 
         # KPIs inline — period first, then stats
         self._sd_kpis = {}
-        # Period label
         period_f = QFrame()
         period_f.setObjectName("sd_period_f")
         period_f.setAttribute(Qt.WA_StyledBackground, True)
@@ -167,7 +184,7 @@ class StudentDetail(ThemedWidget):
             f = QFrame()
             f.setObjectName("kpi_small")
             f.setAttribute(Qt.WA_StyledBackground, True)
-            f.setMinimumWidth(ds.kpi_card_height)  # largeur minimale = hauteur pour des KPIs carrés
+            f.setMinimumWidth(ds.kpi_card_height)
             fl = QVBoxLayout(f)
             fl.setContentsMargins(ds.space_xxs, 2, ds.space_xxs, 2)
             v = QLabel("—")
@@ -179,11 +196,11 @@ class StudentDetail(ThemedWidget):
             fl.addWidget(v)
             fl.addWidget(l)
             self._sd_kpis[k] = v
-            hdr.addWidget(f, 1)  # stretch=1 pour largeurs égales
+            hdr.addWidget(f, 1)
 
         self._sd_add_btn = QPushButton("+")
         self._sd_add_btn.setObjectName("sd_add_btn")
-        self._sd_add_btn.setFixedSize(theme_manager.image.add_btn, theme_manager.image.add_btn)  # 100×100
+        self._sd_add_btn.setFixedSize(theme_manager.image.add_btn, theme_manager.image.add_btn)
         self._sd_add_btn.setCursor(Qt.PointingHandCursor)
         self._sd_add_btn.setToolTip(_("student.add_event"))
         self._sd_add_btn.clicked.connect(self._on_add_event)
@@ -271,13 +288,17 @@ class StudentDetail(ThemedWidget):
         if not info:
             return
 
-        name = info["class_label"] + " — " + f"{info['first_name']} {info['last_name']}"
-        self._sd_header.setText(f"<b style='color:{p.text_strong}'>{name}</b>  {info['class_label']}")
+        # Q22c — Nom
+        self._sd_name_lbl.setText(f"{info['first_name']} {info['last_name']}")
+        # Q22d — Classe
+        self._sd_class_lbl.setText(info.get("class_label", "—"))
+        # Q22e — ID
+        self._sd_id_lbl.setText(f"ID : {student_id}")
 
         pix = QPixmap(get_photo_path(student_id))
         if not pix.isNull():
             self._sd_photo.setPixmap(
-                pix.scaled(89, 89, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix.scaled(ds.icon_lg, ds.icon_lg, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
 
         kpi = self._loader.get_student_kpis(student_id, date_from, date_to)
