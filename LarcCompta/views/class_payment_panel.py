@@ -132,15 +132,16 @@ class ClassPaymentPanel(QWidget):
             return
         avail_w = self.width()
         cols = max(1, (avail_w + DEFAULT_CONFIG.spacing) // (DEFAULT_CONFIG.card_w + DEFAULT_CONFIG.spacing)) if avail_w > 100 else 3
+        # Extraire toutes les cartes en utilisant takeAt (pas removeWidget)
         cards = []
-        for i in reversed(range(self._grid_layout.count())):
-            item = self._grid_layout.itemAt(i)
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
             if item and item.widget():
                 w = item.widget()
-                self._grid_layout.removeWidget(w)
                 if isinstance(w, StudentCard):
-                    cards.insert(0, w)
+                    cards.append(w)
                 else:
                     w.deleteLater()
+        # Replacer avec le bon nombre de colonnes
         for idx, card in enumerate(cards):
             self._grid_layout.addWidget(card, idx // cols, idx % cols, Qt.AlignCenter)
