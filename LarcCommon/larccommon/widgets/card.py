@@ -156,34 +156,31 @@ class StudentCard(QFrame):
     def set_exit_count(self, count: int):
         self._exit_label.setText(f"{count} sortie(s)" if count else '')
 
-    def set_payment_overdue(self, overdue: bool):
-        """Bordure rouge si en retard de paiement, verte si à jour."""
+    def set_payment_status(self, status: str):
+        """Indicateur de paiement : retard (rouge), normal (vert), solde (or).
+
+        Affiche le statut sous le nom et colore la bordure.
+        """
         p = theme_manager.palette
         c = self._cfg
-        if overdue:
-            self.setStyleSheet(
-                f"StudentCard {{"
-                f"  background: {p.error_container};"
-                f"  color: {p.text_strong};"
-                f"  border: 2px solid {p.error};"
-                f"  border-radius: {c.border_radius}px; padding: {c.padding}px;"
-                f"}}"
-                f"StudentCard:hover {{"
-                f"  background: {p.error_container}; color: {p.text_strong};"
-                f"  border-color: {p.error};"
-                f"}}")
-        else:
-            self.setStyleSheet(
-                f"StudentCard {{"
-                f"  background: {p.surface};"
-                f"  color: {p.text_strong};"
-                f"  border: 2px solid {p.success};"
-                f"  border-radius: {c.border_radius}px; padding: {c.padding}px;"
-                f"}}"
-                f"StudentCard:hover {{"
-                f"  background: {p.surface_variant};"
-                f"  border-color: {p.success};"
-                f"}}")
+        colors = {
+            "retard": (p.error, p.error_container, "En retard"),
+            "normal": (p.success, p.surface, "En cours"),
+            "solde":  (p.tertiary, p.surface, "Soldé"),
+        }
+        border_c, bg_c, label = colors.get(status, (p.outline, p.surface, ""))
+        self.setStyleSheet(
+            f"StudentCard {{"
+            f"  background: {bg_c};"
+            f"  color: {p.text_strong};"
+            f"  border: 2px solid {border_c};"
+            f"  border-radius: {c.border_radius}px; padding: {c.padding}px;"
+            f"}}"
+            f"StudentCard:hover {{"
+            f"  background: {bg_c};"
+            f"  border-color: {border_c};"
+            f"}}")
+        self.set_status(label, border_c)
 
     def set_absent(self, absent: bool):
         p = theme_manager.palette

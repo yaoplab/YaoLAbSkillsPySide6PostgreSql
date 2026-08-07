@@ -70,13 +70,19 @@ class ClassPaymentPanel(QWidget):
         for row in cur.fetchall():
             sid, ln, fn, fee, paid = row
             overdue = paid < fee
+            if paid <= 0:
+                status = "retard"
+            elif paid >= fee:
+                status = "solde"
+            else:
+                status = "normal"
             students.append({
                 "id": sid,
                 "last_name": ln,
                 "first_name": fn,
                 "fee": fee,
                 "paid": paid,
-                "overdue": overdue,
+                "status": status,
             })
 
         if not students:
@@ -95,7 +101,7 @@ class ClassPaymentPanel(QWidget):
             card = StudentCard(s["id"], s["last_name"], s["first_name"], DEFAULT_CONFIG)
             card.setCursor(Qt.PointingHandCursor)
             card.clicked.connect(lambda sid=s["id"]: self.student_selected.emit(sid))
-            card.set_payment_overdue(s["overdue"])
+            card.set_payment_status(s["status"])
             card.mousePressEvent = self._wrap_click(card, s["id"])
             self._grid_layout.addWidget(card, i // cols, i % cols, Qt.AlignCenter)
 
