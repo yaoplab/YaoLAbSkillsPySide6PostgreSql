@@ -154,24 +154,24 @@ class _DesignSystem(QObject):
     # 5. TYPOGRAPHIE DYNAMIQUE (Objets QFont M3)
     # =========================================================================
     @property
-    def font_h1(self) -> QFont: 
-        return self._tm.typography.headline_medium
+    def font_h1(self) -> int:
+        return self._tm.typography.headline_medium.size   # 28
 
     @property
-    def font_h2(self) -> QFont: 
-        return self._tm.typography.title_large
+    def font_h2(self) -> int:
+        return self._tm.typography.title_large.size       # 22
 
     @property
-    def font_title(self) -> QFont: 
-        return self._tm.typography.title_medium 
+    def font_title(self) -> int:
+        return self._tm.typography.title_medium.size      # 16
 
     @property
-    def font_body(self) -> QFont: 
-        return self._tm.typography.body_medium
-        
+    def font_body(self) -> int:
+        return self._tm.typography.body_medium.size        # 14
+
     @property
-    def font_small(self) -> QFont: 
-        return self._tm.typography.body_small
+    def font_small(self) -> int:
+        return self._tm.typography.body_small.size         # 12
         
     # Versions px pour QSS (échelle M3 complète)
     @property

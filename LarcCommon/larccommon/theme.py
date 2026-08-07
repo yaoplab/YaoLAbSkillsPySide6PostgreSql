@@ -327,6 +327,11 @@ class ThemeManager(QObject):
         return self._phi_theme
 
     @property
+    def typography(self):
+        """Typographie M3 depuis le thème phibuilder actif."""
+        return self.phi_theme.typo
+
+    @property
     def fonts(self) -> FontScale:
         return self._theme.fonts
 
