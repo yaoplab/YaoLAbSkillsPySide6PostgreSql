@@ -6,7 +6,7 @@ import os
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea, QStackedWidget,
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea, QStackedWidget, QSplitter,
 )
 
 from larccommon.database import db
@@ -129,12 +129,21 @@ class MainWindow(QWidget):
         sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         sidebar_scroll.setFrameShape(QScrollArea.NoFrame)
         sidebar_scroll.setWidget(sidebar)
-        sidebar_scroll.setFixedWidth(ds.sidebar_width)
-        layout.addWidget(sidebar_scroll)
+        sidebar_scroll.setMinimumWidth(ds.space_xxl * 2)  # 168px min
+        sidebar_scroll.setMaximumWidth(ds.sidebar_width + ds.space_xxxl)  # 233+136 max
 
         # ── Content ──
         self._stack = QStackedWidget()
-        layout.addWidget(self._stack, 1)
+
+        # QSplitter entre sidebar et contenu
+        self._splitter = QSplitter(Qt.Horizontal)
+        self._splitter.setChildrenCollapsible(False)
+        self._splitter.addWidget(sidebar_scroll)
+        self._splitter.addWidget(self._stack)
+        self._splitter.setSizes([ds.sidebar_width, ds.golden_width(ds.sidebar_width) * 2])
+        self._splitter.setHandleWidth(ds.space_xxs)  # 4px
+
+        layout.addWidget(self._splitter)
         self._restyle()
 
     # ------------------------------------------------------------------
@@ -229,8 +238,10 @@ class MainWindow(QWidget):
         p = theme_manager.palette
         try:
             self._sidebar.setStyleSheet(
-                f"#sidebar {{ background-color: {p.surface_variant}; "
-                f"border-right: {ds.border_width}px solid {p.border}; }}")
+                f"#sidebar {{ background-color: {p.surface_variant}; }}")
             self._stack.setStyleSheet(f"background: {p.background}; border: none;")
+            if hasattr(self, '_splitter'):
+                self._splitter.setStyleSheet(
+                    f"QSplitter::handle {{ background: {p.border}; }}")
         except RuntimeError:
             pass
