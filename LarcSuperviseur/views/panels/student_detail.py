@@ -138,7 +138,7 @@ class StudentDetail(ThemedWidget):
         # Photo — Q22a
         self._sd_photo = QLabel()
         self._sd_photo.setObjectName("sd_photo")
-        self._sd_photo.setFixedSize(ds.icon_lg, ds.icon_lg)  # 52×52
+        self._sd_photo.setFixedSize(theme_manager.image.logo, theme_manager.image.logo)  # 89×89
         self._sd_photo.setAlignment(Qt.AlignCenter)
         hdr.addWidget(self._sd_photo)
 
@@ -298,7 +298,7 @@ class StudentDetail(ThemedWidget):
         pix = QPixmap(get_photo_path(student_id))
         if not pix.isNull():
             self._sd_photo.setPixmap(
-                pix.scaled(ds.icon_lg, ds.icon_lg, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                pix.scaled(theme_manager.image.logo, theme_manager.image.logo, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
 
         kpi = self._loader.get_student_kpis(student_id, date_from, date_to)

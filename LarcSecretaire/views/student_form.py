@@ -239,7 +239,7 @@ class StudentForm(ThemedWidget):
 
         # Photo — Q22a
         self._detail_photo = QLabel()
-        self._detail_photo.setFixedSize(ds.icon_lg, ds.icon_lg)  # 52×52
+        self._detail_photo.setFixedSize(theme_manager.image.logo, theme_manager.image.logo)  # 89×89
         self._detail_photo.setStyleSheet(
             f"background: {p.primary_container}; border-radius: {ds.radius_sm}px;")
         self._detail_photo.setAlignment(Qt.AlignCenter)
@@ -444,9 +444,9 @@ class StudentForm(ThemedWidget):
         sid = data["id"]
         px = QPixmap(get_photo_path(sid))
         if px.isNull():
-            px = _make_avatar(data.get("last_name", ""), data.get("first_name", ""), ds.icon_lg)
+            px = _make_avatar(data.get("last_name", ""), data.get("first_name", ""), theme_manager.image.logo)
         else:
-            px = px.scaled(ds.icon_lg, ds.icon_lg, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            px = px.scaled(theme_manager.image.logo, theme_manager.image.logo, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._detail_photo.setPixmap(px)
         # Q22c — Nom (prénom + nom)
         fn = data.get("first_name", "") or ""
