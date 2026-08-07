@@ -24,6 +24,7 @@ NAV_ITEMS = [
     ("parents",    "Parents",         "person"),
     ("students",   "Eleves",          "school"),
     ("rappels",    "Rappels",         "schedule"),
+    ("config",     "Configuration",   "settings"),
 ]
 
 
@@ -229,6 +230,9 @@ class MainWindow(QWidget):
             elif key == "rappels":
                 from LarcCompta.views.reminders import ReminderPanel
                 self._pages[key] = ReminderPanel()
+            elif key == "config":
+                from LarcCompta.views.fee_config import FeeConfig
+                self._pages[key] = FeeConfig()
             else:
                 return
             self._stack.addWidget(self._pages[key])
