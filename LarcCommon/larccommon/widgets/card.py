@@ -158,27 +158,26 @@ class StudentCard(QFrame):
         self._exit_label.setText(f"{count} sortie(s)" if count else '')
 
     def set_payment_status(self, status: str):
-        """Bordure coloree + texte sous le nom : retard (rouge), normal (vert), solde (bleu)."""
+        """Bordure coloree + texte. Fond toujours surface (homogene)."""
         p = theme_manager.palette
         c = self._cfg
         colors = {
-            "retard": (p.error, p.error_container, "En retard"),
-            "normal": (p.success, p.surface, "En cours"),
-            "solde":  (p.primary, p.surface, "Solde"),
+            "retard": (p.error, "En retard"),
+            "normal": (p.success, "En cours"),
+            "solde":  (p.primary, "Soldé"),
         }
-        border_c, bg_c, label = colors.get(status, (p.outline, p.surface, ""))
+        border_c, label = colors.get(status, (p.outline, ""))
         self.setStyleSheet(
             f"StudentCard {{"
-            f"  background: {bg_c};"
+            f"  background: {p.surface};"
             f"  color: {p.text_strong};"
             f"  border: {ds.border_width * 2}px solid {border_c};"
             f"  border-radius: {c.border_radius}px; padding: {c.padding}px;"
             f"}}"
             f"StudentCard:hover {{"
-            f"  background: {bg_c};"
+            f"  background: {p.surface_variant};"
             f"  border-color: {border_c};"
             f"}}")
-        # Afficher le texte du statut en bas de la vignette
         s = theme_manager.font_size
         self._status_label.setText(label)
         self._status_label.setStyleSheet(
