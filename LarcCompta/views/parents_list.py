@@ -99,7 +99,7 @@ class ParentsList(QScrollArea):
                    COALESCE(SUM(CASE WHEN prog.id IN (13,23) THEN {LYCEE} ELSE {COLLEGE} END), 0),
                    COALESCE(SUM(pay.paid_amount), 0),
                    COUNT(DISTINCT stu.aecuser_ptr_id),
-                   MAX(COALESCE(sch.payment_mode, 'inconnu'))
+                   MAX(COALESCE(sf.payment_mode, 'inconnu'))
             FROM larcauth_aecuser par
             JOIN larcauth_student_parent sp ON sp.parent_id = par.id
             JOIN larcauth_student stu2 ON stu2.aecuser_ptr_id = sp.student_id
@@ -107,10 +107,10 @@ class ParentsList(QScrollArea):
             JOIN larcauth_classroom c ON c.id = stu2.s_classroom_id
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program prog ON prog.id = l.fk_program_id
-            LEFT JOIN compta_payment_schedule sch ON sch.student_id = stu.id
+            LEFT JOIN compta_student_fee sf ON sf.student_id = stu.id
             LEFT JOIN LATERAL (
                 SELECT COALESCE(SUM(cp.amount), 0) as paid_amount
-                FROM compta_payment cp WHERE cp.student_id = stu2.aecuser_ptr_id
+                FROM compta_payment cp WHERE cp.parent_id = par.id
             ) pay ON true
             WHERE stu2.enabled = true
             GROUP BY par.id, par.first_name, par.last_name

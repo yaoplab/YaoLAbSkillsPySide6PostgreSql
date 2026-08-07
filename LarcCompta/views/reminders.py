@@ -105,9 +105,9 @@ class _ReminderForm(QDialog):
                     "JOIN larcauth_student_parent sp ON sp.parent_id = p.id "
                     "WHERE sp.student_id = %s LIMIT 1", (self._sid,))
         pr = cur.fetchone()
-        cur.execute("""INSERT INTO compta_reminder (student_id, parent_id, reminder_type, message)
-            VALUES (%s, %s, %s, %s)""",
-            (self._sid, pr[0] if pr else None,
+        cur.execute("""INSERT INTO compta_reminder (parent_id, reminder_type, message)
+            VALUES (%s, %s, %s)""",
+            (pr[0] if pr else self._sid,
              self._f_type.currentText(), self._f_msg.toPlainText().strip()))
         self.accept()
 
@@ -180,7 +180,9 @@ class ReminderPanel(QScrollArea):
         cur.execute(f"""
             SELECT a.id, a.first_name, a.last_name,
                    CASE WHEN prog.id IN (11,12,21,22) THEN {COLLEGE} ELSE {LYCEE} END,
-                   COALESCE((SELECT SUM(cp.amount) FROM compta_payment cp WHERE cp.student_id = a.id), 0),
+                   COALESCE((SELECT SUM(cp.amount) FROM compta_payment cp
+                       JOIN larcauth_student_parent sp2 ON sp2.parent_id = cp.parent_id
+                       WHERE sp2.student_id = a.id), 0),
                    c.label, a.tel_smartphone_1, a.email
             FROM larcauth_aecuser a
             JOIN larcauth_student s2 ON s2.aecuser_ptr_id = a.id
@@ -261,7 +263,7 @@ class ReminderPanel(QScrollArea):
         cur = conn.cursor()
         cur.execute("""
             SELECT r.sent_at, r.reminder_type, a.first_name, a.last_name, r.status, LEFT(r.message, 80)
-            FROM compta_reminder r JOIN larcauth_aecuser a ON a.id = r.student_id
+            FROM compta_reminder r JOIN larcauth_aecuser a ON a.id = r.parent_id
             ORDER BY r.sent_at DESC LIMIT 30
         """)
         for row in cur.fetchall():

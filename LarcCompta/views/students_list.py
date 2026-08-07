@@ -99,7 +99,7 @@ class StudentsList(QScrollArea):
                    COALESCE(STRING_AGG(DISTINCT par.first_name || ' ' || par.last_name, ', '), '—') as parents,
                    CASE WHEN prog.id IN (13,23) THEN {LYCEE} ELSE {COLLEGE} END as fee,
                    COALESCE(pay.paid_amount, 0) as paid,
-                   COALESCE(sch.payment_mode, 'inconnu') as mode
+                   COALESCE(sf2.payment_mode, 'inconnu') as mode
             FROM larcauth_aecuser stu
             JOIN larcauth_student s2 ON s2.aecuser_ptr_id = stu.id
             LEFT JOIN larcauth_classroom cl ON cl.id = s2.s_classroom_id
@@ -107,14 +107,16 @@ class StudentsList(QScrollArea):
             LEFT JOIN larcauth_program prog ON prog.id = l.fk_program_id
             LEFT JOIN larcauth_student_parent sp ON sp.student_id = stu.id
             LEFT JOIN larcauth_aecuser par ON par.id = sp.parent_id
-            LEFT JOIN compta_payment_schedule sch ON sch.student_id = stu.id
+            LEFT JOIN compta_student_fee sf2 ON sf2.student_id = stu.id
             LEFT JOIN LATERAL (
                 SELECT COALESCE(SUM(cp.amount), 0) as paid_amount
-                FROM compta_payment cp WHERE cp.student_id = stu.id
+                FROM compta_payment cp
+                JOIN larcauth_student_parent sp2 ON sp2.parent_id = cp.parent_id
+                WHERE sp2.student_id = stu.id
             ) pay ON true
             WHERE s2.enabled = true
             GROUP BY stu.id, stu.first_name, stu.last_name, cl.label, prog.id,
-                     pay.paid_amount, sch.payment_mode
+                     pay.paid_amount, sf2.payment_mode
             ORDER BY (CASE WHEN prog.id IN (13,23) THEN {LYCEE} ELSE {COLLEGE} END
                      - COALESCE(pay.paid_amount, 0)) DESC
         """)

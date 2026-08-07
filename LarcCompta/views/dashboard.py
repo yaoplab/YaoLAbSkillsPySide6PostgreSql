@@ -369,7 +369,7 @@ class Dashboard(QScrollArea):
         paid = cur.fetchone()[0]
         rem = max(0, total_du - paid)
         taux = (paid / total_du * 100) if total_du > 0 else 0
-        cur.execute("SELECT COUNT(DISTINCT student_id) FROM compta_payment")
+        cur.execute("SELECT COUNT(DISTINCT parent_id) FROM compta_payment")
         n_payers = cur.fetchone()[0]
 
         kpis = [
@@ -428,13 +428,15 @@ class Dashboard(QScrollArea):
             cur.execute(f"""
                 SELECT COALESCE(SUM(cp.amount), 0)
                 FROM compta_payment cp
-                JOIN larcauth_student s2 ON s2.aecuser_ptr_id = cp.student_id
+                JOIN larcauth_student_parent sp ON sp.parent_id = cp.parent_id
+                JOIN larcauth_student s2 ON s2.aecuser_ptr_id = sp.student_id
                 JOIN larcauth_classroom c2 ON c2.id = s2.s_classroom_id
                 JOIN larcauth_level l2 ON l2.id = c2.fk_level_id
                 JOIN larcauth_program p2 ON p2.id = l2.fk_program_id
                 WHERE p2.id IN ({','.join(str(i) for i in ids)}) AND s2.enabled = true
             """)
             pad = cur.fetchone()[0]
+            pad = min(pad, cnt * fee)  # cap at total
             bar_data.append((f"{cat} ({_fmt(fee)})", pad, cnt * fee))
 
         bar = _BarChart("Encaissements par categorie", bar_data)
@@ -480,13 +482,15 @@ class Dashboard(QScrollArea):
             cur.execute("""
                 SELECT COALESCE(SUM(cp.amount), 0)
                 FROM compta_payment cp
-                JOIN larcauth_student s2 ON s2.aecuser_ptr_id = cp.student_id
+                JOIN larcauth_student_parent sp ON sp.parent_id = cp.parent_id
+                JOIN larcauth_student s2 ON s2.aecuser_ptr_id = sp.student_id
                 JOIN larcauth_classroom c2 ON c2.id = s2.s_classroom_id
                 JOIN larcauth_level l2 ON l2.id = c2.fk_level_id
                 JOIN larcauth_program p2 ON p2.id = l2.fk_program_id
                 WHERE p2.sigle = %s AND s2.enabled = true
             """, (sigle,))
             pad = cur.fetchone()[0]
+            pad = min(pad, total)  # cap at total for this program
             pct = (pad / total * 100) if total > 0 else 0
 
             row = QWidget()
