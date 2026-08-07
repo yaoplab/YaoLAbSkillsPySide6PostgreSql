@@ -1,6 +1,6 @@
 from phibuilder.widgets import M3Button, M3Label, M3StackedWidget
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QScrollArea,
+    QWidget, QHBoxLayout, QVBoxLayout, QScrollArea,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QIcon
@@ -9,28 +9,8 @@ from larccommon.session import session
 from larccommon.database import db, DBMode
 from larccommon.design_system import ds
 from larccommon.theme import theme_manager
-from larccommon.icons import icon as md3_icon
+from larccommon.widgets.nav_button import NavButton
 from larccommon.safe_slot import safe_slot
-
-
-class _SectionButton(QPushButton):
-    def __init__(self, label: str, icon_name: str | None = None, parent=None):
-        super().__init__(label, parent)
-        self.setCheckable(True)
-        self.setFixedHeight(theme_manager.image.theme_btn)
-        self.setCursor(Qt.PointingHandCursor)
-        font = QFont()
-        font.setPointSize(10)
-        self.setFont(font)
-        if icon_name:
-            try:
-                self.setIcon(md3_icon(icon_name, color=theme_manager.palette.text_strong, size=18))
-            except Exception:
-                pass
-
-    def set_state(self, enabled: bool, visible: bool):
-        self.setVisible(visible)
-        self.setEnabled(enabled)
 
 
 class HubWindow(QWidget):
@@ -258,18 +238,13 @@ class HubWindow(QWidget):
         sections.append(('config', 'Configuration', has_config, False))
 
         for key, label, has_role, enabled in sections:
-            btn = _SectionButton(label, icon_name=section_icons.get(key))
-            btn.clicked.connect(lambda checked, k=key: self._switch_to(k))
-            btn.set_state(enabled=enabled and has_role, visible=has_role)
-            if not enabled and has_role:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
-                        color: {theme_manager.palette.text_strong};
-                        background: transparent;
-                        border: none; text-align: left; padding: {ds.space_xs}px {ds.space_sm}px;
-                    }}
-                    QPushButton:hover {{ background: {theme_manager.palette.surface}; }}
-                """)
+            btn = NavButton(
+                text=label,
+                icon_name=section_icons.get(key),
+                on_click=lambda checked=False, k=key: self._switch_to(k),
+            )
+            btn.setVisible(has_role)
+            btn.setEnabled(enabled and has_role)
             self._btn_layout.addWidget(btn)
 
             page = self._build_page(key, label)
