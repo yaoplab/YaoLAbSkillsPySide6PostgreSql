@@ -120,7 +120,7 @@ class DataLoader:
                 FROM larcauth_classroom c
                 JOIN larcauth_level l ON l.id = c.fk_level_id
                 JOIN larcauth_program p ON p.id = l.fk_program_id
-                WHERE c.enabled = TRUE AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')
+                WHERE c.enabled = TRUE AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')
                 ORDER BY p.sigle, c.label
             """)
             return cur.fetchall()
@@ -168,9 +168,7 @@ class DataLoader:
     # ------------------------------------------------------------------
     def _build_class_filter(self, mode: str) -> str:
         if mode == "grp_all":
-            return "AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')"
-        if mode == "grp_primaire":
-            return "AND (p.sigle ILIKE 'PYP' OR p.sigle ILIKE 'PP')"
+            return "AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')"
         if mode == "grp_college":
             return "AND (p.sigle ILIKE 'PEI' OR p.sigle ILIKE 'MYP')"
         if mode == "grp_lycee":

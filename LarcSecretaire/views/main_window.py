@@ -314,17 +314,14 @@ class MainWindow(QWidget):
 
         # ---- SidebarWidget partage pour les sections classes (Sous-systeme K) ----
         _sections = [
-            (_("sec_main.primaire"), [("PYP", "PYP"), ("PP", "PP")]),
             (_("sec_main.college"), [("PEI", "PEI"), ("MYP", "MYP")]),
             (_("sec_main.lycee"), [("DP", "DPFr"), ("DPEn", "DPEn")]),
         ]
         _prog_style = {
-            "PYP":  ("primary",   "primary_container",   "on_primary"),
-            "PP":   ("secondary", "secondary_container", "on_secondary"),
-            "PEI":  ("primary",   "primary_container",   "on_primary"),
-            "MYP":  ("secondary", "secondary_container", "on_secondary"),
-            "DPFr": ("error",     "error_container",     "on_error"),
-            "DPEn": ("tertiary",  "tertiary_container",  "on_tertiary"),
+            "PEI": ("primary", "primary_container", "on_primary"),
+            "MYP": ("secondary", "secondary_container", "on_secondary"),
+            "DPFr": ("error", "error_container", "on_error"),
+            "DPEn": ("tertiary", "tertiary_container", "on_tertiary"),
         }
         search_btn = M3Button(_("sec_main.search"))
         search_btn.setMinimumHeight(ds.field_height + ds.space_xs)
@@ -405,7 +402,6 @@ class MainWindow(QWidget):
         self._kpi_labels = {}
         for key, label in [
             ("total", _("sec_main.kpi.total")),
-            ("primaire", _("sec_main.kpi.primaire")),
             ("college", _("sec_main.kpi.college")),
             ("lycee", _("sec_main.kpi.lycee")),
             ("enseignants", _("sec_main.kpi.teachers")),
@@ -563,15 +559,13 @@ class MainWindow(QWidget):
         categories = []
         p = theme_manager.palette
         prog_colors = {
-            "PYP": QColor(p.primary),
-            "PP": QColor(p.secondary),
             "PEI": QColor(p.primary),
             "MYP": QColor(p.secondary),
             "DPFr": QColor(p.error),
             "DPEn": QColor(p.success),
         }
-        prog_labels = {"PYP": "PYP", "PP": "PP", "PEI": "PEI", "MYP": "MYP", "DPFr": "DP", "DPEn": "DPEn"}
-        all_sigles = ("PYP", "PP", "PEI", "MYP", "DPFr", "DPEn")
+        prog_labels = {"PEI": "PEI", "MYP": "MYP", "DPFr": "DP", "DPEn": "DPEn"}
+        all_sigles = ("PEI", "MYP", "DPFr", "DPEn")
         by_cat = {}
         for niveau, sigle, cnt in rows:
             if niveau not in by_cat:
@@ -625,7 +619,7 @@ class MainWindow(QWidget):
         try:
             cur = conn.cursor()
 
-            _SEC_PROGS = ("PYP", "PP", "PEI", "MYP", "DPEn", "DPFr")
+            _SEC_PROGS = ("PEI", "MYP", "DPEn", "DPFr")
 
             # Stats globales + enseignants KPI
             cur.execute(
@@ -668,7 +662,7 @@ class MainWindow(QWidget):
             )
             prog_rows = cur.fetchall()
             self._dashboard_table.setRowCount(len(prog_rows))
-            primaire = college = lycee = 0
+            college = lycee = 0
             total_g = total_f = 0
             for i, (sigle, actifs, slots, garcons, filles) in enumerate(prog_rows):
                 taux = f"{actifs / slots * 100:.0f}%" if slots else "—"
@@ -686,15 +680,12 @@ class MainWindow(QWidget):
                     item = QTableWidgetItem(val)
                     item.setTextAlignment(Qt.AlignCenter)
                     self._dashboard_table.setItem(i, col, item)
-                if sigle in ("PYP", "PP"):
-                    primaire += actifs
-                elif sigle in ("PEI", "MYP"):
+                if sigle in ("PEI", "MYP"):
                     college += actifs
                 elif sigle in ("DPFr", "DPEn"):
                     lycee += actifs
                 total_g += garcons
                 total_f += filles
-            self._kpi_widgets["primaire"].setText(str(primaire))
             self._kpi_widgets["college"].setText(str(college))
             self._kpi_widgets["lycee"].setText(str(lycee))
 
