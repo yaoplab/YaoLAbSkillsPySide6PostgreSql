@@ -245,17 +245,17 @@ class HubWindow(QWidget):
         has_secretariat = tf.get('secretary') or tf.get('director')
         sections.append(('secretariat', 'Secrétariat', has_secretariat, conn_ok))
 
-        has_config = tf.get('director') or tf.get('coordinator')
-        sections.append(('config', 'Configuration', has_config, False))
-
-        has_bulletin = tf.get('secretary') or tf.get('director') or tf.get('coordinator')
-        sections.append(('bulletin', 'Bulletins', has_bulletin, False))
-
         has_rh = tf.get('director') or tf.get('secretary')
         sections.append(('rh', 'Ress. Humaines', has_rh, conn_ok))
 
         has_compta = tf.get('director') or tf.get('secretary')
         sections.append(('compta', 'Comptabilite', has_compta, conn_ok))
+
+        has_bulletin = tf.get('secretary') or tf.get('director') or tf.get('coordinator')
+        sections.append(('bulletin', 'Bulletins', has_bulletin, False))
+
+        has_config = tf.get('director') or tf.get('coordinator')
+        sections.append(('config', 'Configuration', has_config, False))
 
         for key, label, has_role, enabled in sections:
             btn = _SectionButton(label, icon_name=section_icons.get(key))
