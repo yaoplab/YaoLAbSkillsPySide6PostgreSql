@@ -337,13 +337,13 @@ class Dashboard(QScrollArea):
                 CASE WHEN p.id IN (11,12,21,22) THEN 'College (2.5M)'
                      ELSE 'Lycee (3M)' END as cat,
                 COUNT(*),
-                CASE WHEN p.id IN (11,12,21,22) THEN %s ELSE %s END as fee
+                CASE WHEN bool_or(p.id IN (11,12,21,22)) THEN %s ELSE %s END as fee
             FROM larcauth_student s
             JOIN larcauth_classroom c ON c.id = s.s_classroom_id
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
             WHERE s.enabled = true
-            GROUP BY cat
+            GROUP BY 1
         """, (COLLEGE_FEE, LYCEE_FEE))
         rows = cur.fetchall()
 
