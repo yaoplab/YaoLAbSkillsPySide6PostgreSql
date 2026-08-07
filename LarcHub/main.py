@@ -96,7 +96,7 @@ def main() -> None:
     login = LoginWindow(
         on_success=on_success,
         title_prefix="LarcHub",
-        subtitle="Supervision · Secrétariat · RH · Comptabilité",
+        subtitle="Supervision · Scolarité · RH · Secrétariat",
         on_intranet_login=on_intranet_login,
         on_cloud_login=on_cloud_login,
     )

@@ -1,8 +1,10 @@
-"""MainWindow LarcCompta — SidebarWidget classes + NavButton navigation + dashboard paiement."""
+"""MainWindow LarcScolarite — SidebarWidget classes + NavButton + dashboard."""
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea, QStackedWidget,
 )
@@ -29,7 +31,7 @@ class MainWindow(QWidget):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LarcCompta — Scolarite")
+        self.setWindowTitle("LarcScolarite")
         self._current_key: str = "dashboard"
         self._pages: dict[str, QWidget] = {}
         self._classes: list[tuple] = []
@@ -59,14 +61,25 @@ class MainWindow(QWidget):
         sb.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)
         sb.setSpacing(ds.space_xs)
 
+        # Logo ecole
+        logo_path = os.path.normpath(
+            os.path.join(os.path.dirname(__file__), "..", "..",
+                         "LarcSuperviseur", "img", "logoAEC.png"))
+        if os.path.exists(logo_path):
+            pix = QPixmap(logo_path).scaledToHeight(theme_manager.image.logo, Qt.SmoothTransformation)
+            logo_lbl = QLabel()
+            logo_lbl.setPixmap(pix)
+            logo_lbl.setAlignment(Qt.AlignCenter)
+            sb.addWidget(logo_lbl)
+
         # User
-        user_lbl = QLabel(session.full_name or "Comptabilite")
+        user_lbl = QLabel(session.full_name or "Scolarite")
         user_lbl.setStyleSheet(
             f"font-size: {s(ds.font_label_lg)}px; font-weight: bold; color: {p.text_strong}; "
             f"padding: 0 {ds.space_xs}px; border: none;")
         sb.addWidget(user_lbl)
 
-        role_lbl = QLabel("Comptabilite")
+        role_lbl = QLabel("Scolarite")
         role_lbl.setStyleSheet(
             f"font-size: {s(ds.font_label_sm)}px; color: {p.text_strong}; "
             f"padding: 0 {ds.space_xs}px {ds.space_xs}px {ds.space_xs}px; border: none;")

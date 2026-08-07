@@ -232,7 +232,7 @@ class HubWindow(QWidget):
         sections.append(('rh', 'Ress. Humaines', has_rh, conn_ok))
 
         has_compta = tf.get('director') or tf.get('secretary')
-        sections.append(('compta', 'Comptabilite', has_compta, conn_ok))
+        sections.append(('compta', 'Scolarite', has_compta, conn_ok))
 
         has_config = tf.get('director') or tf.get('coordinator')
         sections.append(('config', 'Configuration', has_config, False))

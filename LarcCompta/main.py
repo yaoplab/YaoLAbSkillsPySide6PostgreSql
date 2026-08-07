@@ -17,7 +17,7 @@ from larccommon.safe_slot import set_debug
 def main() -> None:
     set_debug(True)
     app = QApplication(sys.argv)
-    app.setApplicationName("LarcCompta")
+    app.setApplicationName("LarcScolarite")
     app.setOrganizationName("LarcSpace")
     app.setFont(QFont("Segoe UI", 10))
 
@@ -93,8 +93,8 @@ def main() -> None:
     from larccommon.login import LoginWindow
     login = LoginWindow(
         on_success=on_success,
-        title_prefix="LarcCompta",
-        subtitle="Comptabilite & Scolarite",
+        title_prefix="LarcScolarite",
+        subtitle="Scolarite & Frais",
         on_intranet_login=on_intranet_login,
         on_cloud_login=on_cloud_login,
     )

@@ -25,7 +25,7 @@ Dernière mise à jour : 2026-08-06
 | `LarcDesign/` | Designer (i18n, thèmes, rôles, logs, types, lieux) | `python -m LarcDesign` |
 | `LarcCloudSync/` | Daemon sync PostgreSQL local ↔ Supabase cloud | — |
 | `LarcRH/` | Ressources Humaines (enseignants, staff, absences) | `python -m LarcRH` |
-| `LarcCompta/` | Comptabilité (frais scolarité, paiements, rappels) | `python -m LarcCompta` |
+| `LarcCompta/` | Scolarité (frais, paiements, rappels) | `python -m LarcCompta` |
 | `LarcDocs/` | Génération documentation (manuel, technique, guide) | — |
 | `LarcSupMobile/` | App mobile Flutter (spécifications dans `specificationsMobile/`) | — |
 
@@ -43,7 +43,7 @@ python -m LarcSecretaire           # Secrétariat
 python -m LarcHub                  # Hub
 python -m LarcProf                 # Professeurs
 python -m LarcRH                   # Ressources Humaines
-python -m LarcCompta               # Comptabilité
+python -m LarcCompta               # Scolarité
 python -m LarcDesign               # Designer
 
 # Tests
