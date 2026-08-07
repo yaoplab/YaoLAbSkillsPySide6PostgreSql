@@ -1,4 +1,4 @@
-"""PaymentList — conforme aux 6 skills design Larc."""
+"""PaymentList — conforme aux 6 skills design Larc, parent-based."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QDate
@@ -25,7 +25,7 @@ class _PaymentForm(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Enregistrer un paiement")
         self.setMinimumSize(ds.golden_width(ds.sidebar_width), ds.sidebar_width)
-        self._student_id: int | None = None
+        self._parent_id: int | None = None
         self._setup_ui()
 
     def _setup_ui(self):
@@ -42,9 +42,9 @@ class _PaymentForm(QDialog):
             f"color: {p.text_strong}; font-size: {s(ds.font_body_md)}px;"
         )
 
-        # Recherche eleve
+        # Recherche parent payeur
         self._search = QLineEdit()
-        self._search.setPlaceholderText("Nom, prenom ou email de l'eleve...")
+        self._search.setPlaceholderText("Nom du parent payeur...")
         self._search.setFixedHeight(ds.field_height)
         self._search.setStyleSheet(fstyle)
         self._search.textChanged.connect(self._on_search)
@@ -57,7 +57,7 @@ class _PaymentForm(QDialog):
         self._results.setVisible(False)
         layout.addWidget(self._results)
 
-        self._selected = QLabel("Aucun eleve selectionne")
+        self._selected = QLabel("Aucun parent selectionne")
         self._selected.setStyleSheet(
             f"font-weight: bold; color: {p.primary}; font-size: {s(ds.font_label_lg)}px; border: none;")
         layout.addWidget(self._selected)
@@ -140,37 +140,36 @@ class _PaymentForm(QDialog):
             return
         cur = conn.cursor()
         cur.execute("""
-            SELECT a.id, a.first_name, a.last_name, a.email, c.label
+            SELECT a.id, a.first_name, a.last_name, a.tel_smartphone_1
             FROM larcauth_aecuser a
-            JOIN larcauth_student s ON s.aecuser_ptr_id = a.id
-            LEFT JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-            WHERE s.enabled = true AND (
-                a.last_name ILIKE %s OR a.first_name ILIKE %s OR a.email ILIKE %s)
+            JOIN larcauth_parent p ON p.aecuser_ptr_id = a.id
+            WHERE p.is_payer = TRUE AND p.enabled = TRUE
+            AND (a.last_name ILIKE %s OR a.first_name ILIKE %s)
             ORDER BY a.last_name LIMIT 8
-        """, (f"%{q}%", f"%{q}%", f"%{q}%"))
+        """, (f"%{q}%", f"%{q}%"))
         for row in cur.fetchall():
-            sid, fn, ln, _, cls = row
-            btn = QPushButton(f"{ln} {fn}  —  {cls or ''}")
+            pid, fn, ln, _ = row
+            btn = QPushButton(f"{ln} {fn}")
             btn.setFlat(True)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setStyleSheet(
                 f"QPushButton {{ text-align: left; padding: {ds.space_xxs}px {ds.space_xs}px; "
                 f"color: {theme_manager.palette.text_strong}; font-size: {theme_manager.font_size(12)}px; }}"
                 f"QPushButton:hover {{ background: {theme_manager.palette.surface_variant}; }}")
-            btn.clicked.connect(lambda checked, i=sid, t=f"{ln} {fn}": self._select(i, t))
+            btn.clicked.connect(lambda checked, i=pid, t=f"{ln} {fn}": self._select(i, t))
             self._rl.addWidget(btn)
         self._results.setVisible(True)
 
-    def _select(self, sid: int, name: str):
-        self._student_id = sid
-        self._selected.setText(f"Eleve : {name}")
+    def _select(self, pid: int, name: str):
+        self._parent_id = pid
+        self._selected.setText(f"Parent : {name}")
         self._results.setVisible(False)
         self._search.setText(name)
 
     @safe_slot("_PaymentForm._on_save")
     def _on_save(self):
-        if not self._student_id:
-            QMessageBox.warning(self, "Erreur", "Selectionnez un eleve.")
+        if not self._parent_id:
+            QMessageBox.warning(self, "Erreur", "Selectionnez un parent.")
             return
         try:
             amount = int(self._f_amount.text().replace(" ", ""))
@@ -181,9 +180,9 @@ class _PaymentForm(QDialog):
         if not conn:
             return
         cur = conn.cursor()
-        cur.execute("""INSERT INTO compta_payment (student_id, amount, payment_date, payment_method, reference, notes)
+        cur.execute("""INSERT INTO compta_payment (parent_id, amount, payment_date, payment_method, reference, notes)
             VALUES (%s, %s, %s, %s, %s, %s)""",
-            (self._student_id, amount, self._f_date.date().toPython(),
+            (self._parent_id, amount, self._f_date.date().toPython(),
              self._f_method.currentText(), self._f_ref.text().strip() or None,
              self._f_note.text().strip() or None))
         self.accept()
@@ -209,8 +208,7 @@ class PaymentList(QScrollArea):
 
     @safe_slot("PaymentList._restyle")
     def _restyle(self):
-        self.setStyleSheet(
-            f"#payments {{ background: {theme_manager.palette.background}; border: none; }}")
+        self.setStyleSheet(f"#payments {{ background: {theme_manager.palette.background}; border: none; }}")
 
     def _setup_ui(self):
         p = theme_manager.palette
@@ -218,8 +216,7 @@ class PaymentList(QScrollArea):
 
         hdr = QHBoxLayout()
         title = QLabel("Paiements enregistres")
-        title.setStyleSheet(
-            f"font-size: {s(ds.font_title_md)}px; font-weight: bold; color: {p.text_strong}; border: none;")
+        title.setStyleSheet(f"font-size: {s(ds.font_title_md)}px; font-weight: bold; color: {p.text_strong}; border: none;")
         hdr.addWidget(title)
         hdr.addStretch()
 
@@ -257,7 +254,8 @@ class PaymentList(QScrollArea):
         cur.execute("""
             SELECT cp.id, a.first_name, a.last_name, cp.amount, cp.payment_date,
                    cp.payment_method, cp.reference
-            FROM compta_payment cp JOIN larcauth_aecuser a ON a.id = cp.student_id
+            FROM compta_payment cp
+            JOIN larcauth_aecuser a ON a.id = cp.parent_id
             ORDER BY cp.payment_date DESC, cp.id DESC LIMIT 100
         """)
         for row in cur.fetchall():
@@ -275,9 +273,7 @@ class PaymentList(QScrollArea):
             ]:
                 lbl = QLabel(text)
                 lbl.setFixedWidth(w)
-                lbl.setStyleSheet(
-                    f"font-size: {s(size)}px; {'font-weight: bold;' if bold else ''} "
-                    f"color: {color}; border: none;")
+                lbl.setStyleSheet(f"font-size: {s(size)}px; {'font-weight: bold;' if bold else ''} color: {color}; border: none;")
                 rl.addWidget(lbl)
 
             if ref:
@@ -286,9 +282,8 @@ class PaymentList(QScrollArea):
                 rl.addWidget(rl2)
 
             rl.addStretch()
-            rw.setStyleSheet(
-                f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}"
-                f"QWidget:hover {{ background: {p.surface_variant}; }}")
+            rw.setStyleSheet(f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}"
+                             f"QWidget:hover {{ background: {p.surface_variant}; }}")
             self._list_layout.addWidget(rw)
 
         self._list_layout.addStretch()
