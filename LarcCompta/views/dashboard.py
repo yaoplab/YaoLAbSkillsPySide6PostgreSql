@@ -16,8 +16,26 @@ from larccommon.safe_slot import safe_slot
 # ── Constantes métier (tokens FCFA, pas des px) ──
 COLLEGE_FEE = 2500000
 LYCEE_FEE = 3000000
-COLLEGE_IDS = (11, 12, 21, 22)
-LYCEE_IDS = (13, 23)
+COLLEGE_IDS = (11, 12, 21, 22)  # PYP, PP, MYP, PEI
+LYCEE_IDS = (13, 23)             # DPEn, DPFr
+PRIMAIRE_IDS = (11, 21)          # PYP, PP
+
+# Mapping group_mode → filtre SQL
+GROUP_FILTER_SQL = {
+    "grp_all":      "AND p.sigle IN ('PYP','PP','PEI','MYP','DPEn','DPFr')",
+    "grp_primaire": "AND (p.sigle ILIKE 'PYP' OR p.sigle ILIKE 'PP')",
+    "grp_college":  "AND (p.sigle ILIKE 'PEI' OR p.sigle ILIKE 'MYP')",
+    "grp_lycee":    "AND (p.sigle ILIKE 'DPEn' OR p.sigle ILIKE 'DPFr')",
+}
+
+def _build_filter(mode: str) -> str:
+    """Construit une clause WHERE pour filtrer par programme."""
+    if mode in GROUP_FILTER_SQL:
+        return GROUP_FILTER_SQL[mode]
+    if mode.startswith("grp_"):
+        sigle = mode.split("_")[1]
+        return f"AND p.sigle ILIKE '{sigle}'"
+    return GROUP_FILTER_SQL["grp_all"]
 
 
 def _fmt(amount: int) -> str:
@@ -263,8 +281,9 @@ class _BarChart(QWidget):
 # ═══════════════════════════════════════════════════════════════════════════
 class Dashboard(QScrollArea):
 
-    def __init__(self, parent=None):
+    def __init__(self, group_mode: str = "grp_all", parent=None):
         super().__init__(parent)
+        self._group_mode = group_mode
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
         self.setObjectName("dashboard")
@@ -275,6 +294,17 @@ class Dashboard(QScrollArea):
         self._setup_ui()
         self.setWidget(self._container)
         self.refresh()
+
+    def set_group_mode(self, mode: str):
+        """Change le filtre de groupe et recharge les donnees."""
+        if mode != self._group_mode:
+            self._group_mode = mode
+            labels = {"grp_all": "Tous les niveaux", "grp_primaire": "Primaire (PYP/PP)",
+                      "grp_college": "College (PEI/MYP)", "grp_lycee": "Lycee (DP)"}
+            scope_label = labels.get(mode, mode)
+            if hasattr(self, '_scope_label'):
+                self._scope_label.setText(f"Tableau de bord — {scope_label}")
+            self.refresh()
 
     @safe_slot("Dashboard._restyle")
     def _restyle(self):
@@ -289,11 +319,14 @@ class Dashboard(QScrollArea):
         layout.setSpacing(ds.space_sm)
 
         # DP1 — SCOPE LABEL
-        scope = QLabel("Tableau de bord — Scolarite 2026-2027")
-        scope.setAlignment(Qt.AlignCenter)
-        scope.setStyleSheet(
+        labels = {"grp_all": "Tous les niveaux", "grp_primaire": "Primaire (PYP/PP)",
+                  "grp_college": "College (PEI/MYP)", "grp_lycee": "Lycee (DP)"}
+        scope_label = labels.get(self._group_mode, self._group_mode)
+        self._scope_label = QLabel(f"Tableau de bord — {scope_label}")
+        self._scope_label.setAlignment(Qt.AlignCenter)
+        self._scope_label.setStyleSheet(
             f"font-size: {s(ds.font_title)}px; font-weight: bold; color: {p.primary}; border: none;")
-        layout.addWidget(scope)
+        layout.addWidget(self._scope_label)
 
         # DP2 — KPI ROW (cards horizontales)
         self._kpi_title = QLabel("Indicateurs cles")
@@ -350,8 +383,7 @@ class Dashboard(QScrollArea):
             return
         cur = conn.cursor()
 
-        cur.execute("SELECT COUNT(*) FROM larcauth_student WHERE enabled = true")
-        total_students = cur.fetchone()[0]
+        flt = _build_filter(self._group_mode)
 
         cur.execute(f"""
             SELECT COUNT(*) FILTER (WHERE p.id IN (11,12,21,22)),
@@ -360,17 +392,37 @@ class Dashboard(QScrollArea):
             JOIN larcauth_classroom c ON c.id = s.s_classroom_id
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
-            WHERE s.enabled = true
+            WHERE s.enabled = true {flt}
         """)
         n_co, n_ly = cur.fetchone()
         total_du = n_co * COLLEGE_FEE + n_ly * LYCEE_FEE
 
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM compta_payment")
-        paid = cur.fetchone()[0]
+        cur.execute(f"""
+            SELECT COALESCE(SUM(cp.amount), 0)
+            FROM compta_payment cp
+            JOIN larcauth_student_parent sp ON sp.parent_id = cp.parent_id
+            JOIN larcauth_student s2 ON s2.aecuser_ptr_id = sp.student_id
+            JOIN larcauth_classroom c2 ON c2.id = s2.s_classroom_id
+            JOIN larcauth_level l2 ON l2.id = c2.fk_level_id
+            JOIN larcauth_program p2 ON p2.id = l2.fk_program_id
+            WHERE s2.enabled = true {flt}
+        """)
+        paid = cur.fetchone()[0] or 0
         rem = max(0, total_du - paid)
         taux = (paid / total_du * 100) if total_du > 0 else 0
-        cur.execute("SELECT COUNT(DISTINCT parent_id) FROM compta_payment")
+
+        cur.execute(f"""
+            SELECT COUNT(DISTINCT cp.parent_id)
+            FROM compta_payment cp
+            JOIN larcauth_student_parent sp ON sp.parent_id = cp.parent_id
+            JOIN larcauth_student s2 ON s2.aecuser_ptr_id = sp.student_id
+            JOIN larcauth_classroom c2 ON c2.id = s2.s_classroom_id
+            JOIN larcauth_level l2 ON l2.id = c2.fk_level_id
+            JOIN larcauth_program p2 ON p2.id = l2.fk_program_id
+            WHERE s2.enabled = true {flt}
+        """)
         n_payers = cur.fetchone()[0]
+        total_students = n_co + n_ly
 
         kpis = [
             ("Total du", _fmt(total_du), "primary"),
@@ -391,8 +443,19 @@ class Dashboard(QScrollArea):
             return
         cur = conn.cursor()
 
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM compta_payment")
-        paid = cur.fetchone()[0]
+        flt = _build_filter(self._group_mode)
+
+        cur.execute(f"""
+            SELECT COALESCE(SUM(cp.amount), 0)
+            FROM compta_payment cp
+            JOIN larcauth_student_parent sp ON sp.parent_id = cp.parent_id
+            JOIN larcauth_student s2 ON s2.aecuser_ptr_id = sp.student_id
+            JOIN larcauth_classroom c2 ON c2.id = s2.s_classroom_id
+            JOIN larcauth_level l2 ON l2.id = c2.fk_level_id
+            JOIN larcauth_program p2 ON p2.id = l2.fk_program_id
+            WHERE s2.enabled = true {flt}
+        """)
+        paid = cur.fetchone()[0] or 0
 
         cur.execute(f"""
             SELECT COUNT(*) FILTER (WHERE p.id IN (11,12,21,22)) * {COLLEGE_FEE} +
@@ -401,9 +464,9 @@ class Dashboard(QScrollArea):
             JOIN larcauth_classroom c ON c.id = s.s_classroom_id
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
-            WHERE s.enabled = true
+            WHERE s.enabled = true {flt}
         """)
-        total_du = cur.fetchone()[0]
+        total_du = cur.fetchone()[0] or 0
         rem = max(0, total_du - paid)
 
         donut = _DonutChart("Repartition des frais", [
@@ -418,7 +481,7 @@ class Dashboard(QScrollArea):
             JOIN larcauth_classroom c ON c.id = s.s_classroom_id
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
-            WHERE s.enabled = true
+            WHERE s.enabled = true {flt}
             GROUP BY 1
         """)
         bar_data = []
@@ -472,7 +535,7 @@ class Dashboard(QScrollArea):
             JOIN larcauth_classroom c ON c.id = s.s_classroom_id
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
-            WHERE s.enabled = true
+            WHERE s.enabled = true {flt}
             GROUP BY p.sigle
             ORDER BY p.sigle
         """)

@@ -173,6 +173,11 @@ class MainWindow(QWidget):
             mode_map = {"Primaire": "grp_primaire", "Collège": "grp_college", "Lycée": "grp_lycee"}
             self._current_group_mode = mode_map.get(group, "grp_all")
             self._current_class_id = 0
+        # Mettre a jour le dashboard avec le nouveau filtre
+        if "dashboard" in self._pages:
+            d = self._pages["dashboard"]
+            if hasattr(d, 'set_group_mode'):
+                d.set_group_mode(self._current_group_mode)
         self._switch_to("dashboard")
 
     @safe_slot("MainWindow._on_class_clicked")
@@ -192,6 +197,10 @@ class MainWindow(QWidget):
     def _on_all_clicked(self):
         self._current_group_mode = "grp_all"
         self._current_class_id = 0
+        if "dashboard" in self._pages:
+            d = self._pages["dashboard"]
+            if hasattr(d, 'set_group_mode'):
+                d.set_group_mode("grp_all")
         self._switch_to("dashboard")
 
     # ------------------------------------------------------------------
@@ -207,7 +216,7 @@ class MainWindow(QWidget):
         if key not in self._pages:
             if key == "dashboard":
                 from LarcCompta.views.dashboard import Dashboard
-                self._pages[key] = Dashboard()
+                self._pages[key] = Dashboard(group_mode=self._current_group_mode)
             elif key == "payments":
                 from LarcCompta.views.payment_list import PaymentList
                 self._pages[key] = PaymentList()
