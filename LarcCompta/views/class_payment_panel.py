@@ -100,30 +100,32 @@ class ClassPaymentPanel(QWidget):
 
         self._students = students
         avail_w = self.width()
-        cols = max(1, (avail_w + DEFAULT_CONFIG.spacing) // (DEFAULT_CONFIG.card_w + DEFAULT_CONFIG.spacing)) if avail_w > 100 else 3
+        cfg = DEFAULT_CONFIG
+        cols = max(1, (avail_w + cfg.spacing) // (cfg.card_w + cfg.spacing)) if avail_w > 100 else 3
 
         for i, s in enumerate(students):
-            card = StudentCard(s["id"], s["last_name"], s["first_name"], DEFAULT_CONFIG)
+            card = StudentCard(s["id"], s["last_name"], s["first_name"], cfg)
             card.clicked.connect(lambda sid=s["id"]: self.student_selected.emit(sid))
             card.set_payment_status(s["status"])
             for j in range(card._badges_row.count()):
                 w = card._badges_row.itemAt(j).widget()
                 if w:
                     w.hide()
-            row = i // cols
-            self._grid_layout.addWidget(card, row, i % cols, Qt.AlignCenter)
-            self._grid_layout.setRowStretch(row, 0)
-            self._grid_layout.setRowMinimumHeight(row, DEFAULT_CONFIG.card_h)
+            self._grid_layout.addWidget(card, i // cols, i % cols, Qt.AlignCenter)
+
+        # Spacers pour la derniere ligne incomplete (evite l'etirement)
+        remaining = len(students) % cols
+        if remaining:
+            for i in range(cols - remaining):
+                spacer = QWidget()
+                spacer.setFixedSize(cfg.card_w, cfg.card_h)
+                self._grid_layout.addWidget(spacer, len(students) // cols, cols - remaining + i, Qt.AlignCenter)
 
     def _clear_grid(self):
-        """Reconstruit le layout a zero pour eviter tout heritage de row stretch."""
-        old = self.layout()
-        if old:
-            QWidget().setLayout(old)
-        self._grid_layout = QGridLayout(self)
-        self._grid_layout.setContentsMargins(
-            ds.font_label_lg, ds.font_label_lg, ds.font_label_lg, ds.font_label_lg)
-        self._grid_layout.setSpacing(DEFAULT_CONFIG.spacing)
+        while self._grid_layout.count():
+            item = self._grid_layout.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
 
     def refresh(self):
         if self._class_id:
@@ -131,15 +133,13 @@ class ClassPaymentPanel(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._reflow()
+        if self._students:
+            self._reflow()
 
     def _reflow(self):
-        if not self._students:
-            return
         avail_w = self.width()
-        cols = max(1, (avail_w + DEFAULT_CONFIG.spacing) // (DEFAULT_CONFIG.card_w + DEFAULT_CONFIG.spacing)) if avail_w > 100 else 3
-
-        # Extraire toutes les StudentCards
+        cfg = DEFAULT_CONFIG
+        cols = max(1, (avail_w + cfg.spacing) // (cfg.card_w + cfg.spacing)) if avail_w > 100 else 3
         cards = []
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
@@ -149,17 +149,13 @@ class ClassPaymentPanel(QWidget):
                     cards.append(w)
                 else:
                     w.deleteLater()
-
-        # Reconstruire le layout a zero
-        old = self.layout()
-        if old:
-            QWidget().setLayout(old)  # detache l'ancien sans crash Qt
-        self._grid_layout = QGridLayout(self)
-        self._grid_layout.setContentsMargins(
-            ds.font_label_lg, ds.font_label_lg, ds.font_label_lg, ds.font_label_lg)
-        self._grid_layout.setSpacing(DEFAULT_CONFIG.spacing)
+        # Re-inserer
         for idx, card in enumerate(cards):
-            row = idx // cols
-            self._grid_layout.addWidget(card, row, idx % cols, Qt.AlignCenter)
-            self._grid_layout.setRowStretch(row, 0)
-            self._grid_layout.setRowMinimumHeight(row, DEFAULT_CONFIG.card_h)
+            self._grid_layout.addWidget(card, idx // cols, idx % cols, Qt.AlignCenter)
+        # Spacers derniere ligne
+        remaining = len(cards) % cols
+        if remaining:
+            for i in range(cols - remaining):
+                spacer = QWidget()
+                spacer.setFixedSize(cfg.card_w, cfg.card_h)
+                self._grid_layout.addWidget(spacer, len(cards) // cols, cols - remaining + i, Qt.AlignCenter)
