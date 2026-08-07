@@ -94,31 +94,120 @@ ALTER TABLE compta_reminder ADD COLUMN parent_id INTEGER NOT NULL REFERENCES lar
 
 Un rappel est envoyé au parent pour l'ensemble de ses enfants.
 
+### 1g. Échéancier global — `compta_payment_schedule`
+
+```sql
+-- Remplacer la table existante
+DROP TABLE IF EXISTS compta_payment_schedule CASCADE;
+CREATE TABLE compta_payment_schedule (
+    id                  SERIAL PRIMARY KEY,
+    academic_year       VARCHAR(9) NOT NULL,
+    month_number        INTEGER NOT NULL CHECK (month_number BETWEEN 1 AND 12),
+    percentage_expected DECIMAL(5,2) NOT NULL,   -- % cumulé attendu à la fin du mois (ex: 20.00 = 20%)
+    UNIQUE (academic_year, month_number)
+);
+```
+
+**Exemple d'échéancier annuel (septembre-juin) :**
+
+| Mois | % Cumulé attendu | Pour un total de 5M |
+|---|---|---|
+| Septembre (1) | 10% | 500 000 |
+| Octobre (2) | 20% | 1 000 000 |
+| Novembre (3) | 30% | 1 500 000 |
+| Décembre (4) | 40% | 2 000 000 |
+| Janvier (5) | 50% | 2 500 000 |
+| ... | ... | ... |
+| Juin (10) | 100% | 5 000 000 |
+
+### 1h. Échéancier personnalisé parent — `compta_parent_milestone`
+
+```sql
+CREATE TABLE compta_parent_milestone (
+    id              SERIAL PRIMARY KEY,
+    parent_id       INTEGER NOT NULL REFERENCES larcauth_aecuser(id),
+    due_date        DATE NOT NULL,
+    amount_expected INTEGER NOT NULL,         -- montant attendu à cette date
+    agreed_by       INTEGER REFERENCES larcauth_aecuser(id),  -- comptable qui a validé
+    notes           TEXT,
+    created_at      TIMESTAMP DEFAULT NOW()
+);
+```
+
+Si le parent a des milestones personnalisés → ils **remplacent** l'échéancier global.
+Si pas de milestones → l'échéancier global s'applique.
+
+Exemple : M. Konan négocie avec le comptable :
+- 15 mars 2027 : 1 000 000 FCFA
+- 30 juin 2027 : 4 000 000 FCFA (solde)
+
 ---
 
-## 2. Calcul du statut
+## 2. Calcul du statut (avec dimension temporelle)
 
-### Par parent payeur
+### 2a. Montant attendu à date
 
 ```python
-total_dû_parent    = Σ(compta_student_fee.annual_fee de chaque enfant)
-total_payé_parent  = Σ(compta_payment.amount du parent)
-solde_parent       = total_payé_parent - total_dû_parent
+def montant_attendu(parent_id, total_annuel):
+    # 1. Échéancier personnalisé ?
+    milestones = get_parent_milestones(parent_id)
+    if milestones:
+        aujourd_hui = date.today()
+        return sum(m.amount for m in milestones if m.due_date <= aujourd_hui)
+
+    # 2. Échéancier global
+    mois_courant = date.today().month
+    schedule = get_global_schedule(mois_courant)
+    if schedule:
+        return int(total_annuel * schedule.percentage_expected / 100)
+
+    # 3. Fallback : 100% (pas d'échéancier configuré)
+    return total_annuel
+```
+
+### 2b. Statut parent payeur
+
+```python
+total_dû_parent     = Σ(compta_student_fee.annual_fee de chaque enfant)
+total_payé_parent   = Σ(compta_payment.amount du parent)
+attendu             = montant_attendu(parent_id, total_dû_parent)
+reste_a_payer       = total_dû_parent - total_payé_parent
 
 STATUT_PARENT = {
-    solde >= 0:           "solde",    # vert
-    payé > 0 et solde < 0: "normal",  # orange (en cours)
-    payé == 0:             "retard",  # rouge
+    reste_a_payer <= 0:                             "soldé",     # vert — tout payé
+    payé >= attendu:                                "à jour",    # vert — dans les clous
+    payé > 0 and payé < attendu:                    "en cours",  # orange — paye mais en retard sur l'échéancier
+    payé == 0 and attendu > 0:                      "en retard", # rouge — rien payé
+    attendu == 0:                                   "en retard", # rouge — pas d'échéancier, rien payé
 }
 ```
 
-### Par enfant (hérité du parent)
+**Exemples concrets :**
+
+| Cas | Total dû | Payé | Attendu ce mois | Statut |
+|---|---|---|---|---|
+| Tout payé | 5M | 5M | 2.5M | **Soldé** (vert) |
+| Dans les clous | 5M | 2.5M | 2.5M | **À jour** (vert) |
+| Un peu de retard | 5M | 1M | 2.5M | **En cours** (orange) |
+| Rien payé en janvier | 5M | 0 | 2.5M | **En retard** (rouge) |
+| Rien payé en septembre | 5M | 0 | 500K | **En retard** (rouge — alerte précoce) |
+| Échéancier perso respecté | 5M | 1M | 1M (mars) | **À jour** (vert) |
+
+### 2c. Statut enfant (hérité du/des parents)
 
 ```
 enfant.statut = meilleur_statut(statut_parent1, statut_parent2)
 ```
 
-Si aucun parent payeur lié → pas d'enfant dans la vue compta. Le badge P sera rouge côté secrétaire.
+Ordre : soldé > à jour > en cours > en retard.
+
+Si aucun parent payeur → pas dans la vue compta, badge P rouge côté secrétaire.
+
+### 2d. Dashboard — alerte
+
+Grille de vignettes par classe : l'enfant hérite du statut de son parent.
+Si le parent est rouge, tous ses enfants sont rouges.
+Si le parent est vert, tous ses enfants sont verts.
 
 ---
 
