@@ -58,7 +58,7 @@ for sid, fn, ln, cid in students:
     # 1 ou 2 parents par eleve
     np = random.choices([1, 2], weights=[0.6, 0.4])[0]
     assigned = set()
-    for _ in range(np):
+    for _ignored in range(np):
         (aid,) = random.choice(parents)
         if aid in assigned:
             continue
@@ -104,7 +104,7 @@ for sid, fn, ln, cid in students:
             VALUES (%s, %s, '2026-09-01', 'virement', 'PAID-FULL')""", (sid, fee))
     elif status == "partial":
         n_payments = random.randint(1, 4)
-        for _ in range(n_payments):
+        for _ignored in range(n_payments):
             amt = random.randint(fee // 20, fee // 4)
             paid_total += amt
             if paid_total > fee:
