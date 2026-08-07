@@ -1,24 +1,31 @@
-"""MainWindow LarcCompta — dashboard frais de scolarite."""
+"""MainWindow LarcCompta — conforme aux 6 skills design Larc."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel,
-    QStackedWidget, QScrollArea,
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel,
+    QStackedWidget,
 )
 
 from larccommon.database import db
 from larccommon.session import session
 from larccommon.design_system import ds
 from larccommon.theme import theme_manager
-from larccommon.icons import icon as md3_icon
+from larccommon.widgets.nav_button import NavButton
 from larccommon.safe_slot import safe_slot
 
 
-class MainWindow(QWidget):
+NAV_ITEMS = [
+    ("dashboard", "Tableau de bord", "home"),
+    ("payments",   "Paiements",      "check"),
+    ("parents",    "Parents",         "person"),
+    ("students",   "Eleves",          "school"),
+    ("rappels",    "Rappels",         "schedule"),
+]
 
-    SIDEBAR_WIDTH = 233
+
+class MainWindow(QWidget):
 
     def __init__(self):
         super().__init__()
@@ -34,6 +41,8 @@ class MainWindow(QWidget):
     # UI
     # ------------------------------------------------------------------
     def _setup_ui(self):
+        p = theme_manager.palette
+        s = theme_manager.font_size
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -41,59 +50,38 @@ class MainWindow(QWidget):
         # ── Sidebar ──
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(self.SIDEBAR_WIDTH)
-        sidebar.setStyleSheet(f"""
-            #sidebar {{
-                background-color: {theme_manager.palette.surface_variant};
-                border-right: 1px solid {theme_manager.palette.border};
-            }}
-        """)
+        sidebar.setFixedWidth(ds.sidebar_width)
         sb = QVBoxLayout(sidebar)
-        sb.setContentsMargins(ds.space_xs, theme_manager.image.theme_btn,
-                              ds.space_xs, ds.space_lg)
+        sb.setContentsMargins(ds.space_xs, ds.space_xl, ds.space_xs, ds.space_lg)
         sb.setSpacing(ds.space_xs)
 
-        self._user_label = QLabel(session.full_name or "Comptabilite")
-        self._user_label.setStyleSheet(f"""
-            font-size: {theme_manager.font_size(13)}px; font-weight: bold;
-            color: {theme_manager.palette.text_strong}; padding: 0 5px;
-        """)
-        sb.addWidget(self._user_label)
+        # User info
+        user_lbl = QLabel(session.full_name or "Comptabilite")
+        user_lbl.setStyleSheet(
+            f"font-size: {s(ds.font_label_lg)}px; font-weight: bold; color: {p.text_strong}; "
+            f"padding: 0 {ds.space_xs}px; border: none;")
+        sb.addWidget(user_lbl)
 
-        role = QLabel("Comptabilite")
-        role.setStyleSheet(f"""
-            font-size: {theme_manager.font_size(10)}px;
-            color: {theme_manager.palette.text_strong}; padding: 0 5px 8px 5px;
-        """)
-        sb.addWidget(role)
+        role_lbl = QLabel("Comptabilite")
+        role_lbl.setStyleSheet(
+            f"font-size: {s(ds.font_label_sm)}px; color: {p.text_strong}; "
+            f"padding: 0 {ds.space_xs}px {ds.space_xs}px {ds.space_xs}px; border: none;")
+        sb.addWidget(role_lbl)
 
         sep = QLabel()
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background-color: {theme_manager.palette.border};")
+        sep.setFixedHeight(ds.border_width)
+        sep.setStyleSheet(f"background-color: {p.border};")
         sb.addWidget(sep)
-        sb.addSpacing(8)
+        sb.addSpacing(ds.space_xs)
 
-        # Navigation
-        nav_items = [
-            ("dashboard", "Tableau de bord", "home"),
-            ("payments",   "Paiements",      "check"),
-            ("parents",    "Parents",         "person"),
-            ("students",   "Eleves",          "school"),
-            ("rappels",    "Rappels",         "schedule"),
-        ]
-        self._buttons: dict[str, QPushButton] = {}
-        for key, label, icon_name in nav_items:
-            btn = QPushButton(f"  {label}")
-            btn.setCheckable(True)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedHeight(theme_manager.image.theme_btn)
-            btn.setFont(QFont("Segoe UI", 10))
-            if icon_name:
-                try:
-                    btn.setIcon(md3_icon(icon_name, color=theme_manager.palette.text_strong, size=18))
-                except Exception:
-                    pass
-            btn.clicked.connect(lambda checked, k=key: self._switch_to(k))
+        # Navigation — NavButton standard (skill sidebar-spec K1-K25)
+        self._buttons: dict[str, NavButton] = {}
+        for key, label, icon_name in NAV_ITEMS:
+            btn = NavButton(
+                text=label,
+                icon_name=icon_name,
+                on_click=lambda checked=False, k=key: self._switch_to(k),
+            )
             self._buttons[key] = btn
             sb.addWidget(btn)
 
@@ -103,8 +91,8 @@ class MainWindow(QWidget):
 
         # ── Content ──
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet(f"background: {theme_manager.palette.background};")
         layout.addWidget(self._stack, 1)
+        self._restyle()
 
     # ------------------------------------------------------------------
     # Navigation
@@ -114,30 +102,27 @@ class MainWindow(QWidget):
         if key == self._current_key:
             return
         self._current_key = key
-        for btn in self._buttons.values():
-            btn.setChecked(False)
-        if key in self._buttons:
-            self._buttons[key].setChecked(True)
+
+        for k, btn in self._buttons.items():
+            btn.setChecked(k == key)
 
         if key not in self._pages:
-            if key == "dashboard":
-                from LarcCompta.views.dashboard import Dashboard
-                self._pages[key] = Dashboard()
-            elif key == "payments":
-                from LarcCompta.views.payment_list import PaymentList
-                self._pages[key] = PaymentList()
-            elif key == "parents":
-                from LarcCompta.views.parents_list import ParentsList
-                self._pages[key] = ParentsList()
-            elif key == "students":
-                from LarcCompta.views.students_list import StudentsList
-                self._pages[key] = StudentsList()
-            elif key == "rappels":
-                from LarcCompta.views.reminders import ReminderPanel
-                self._pages[key] = ReminderPanel()
+            mod_map = {
+                "dashboard": ("LarcCompta.views.dashboard", "Dashboard"),
+                "payments":   ("LarcCompta.views.payment_list", "PaymentList"),
+                "parents":    ("LarcCompta.views.parents_list", "ParentsList"),
+                "students":   ("LarcCompta.views.students_list", "StudentsList"),
+                "rappels":    ("LarcCompta.views.reminders", "ReminderPanel"),
+            }
+            if key in mod_map:
+                mod_name, cls_name = mod_map[key]
+                mod = __import__(mod_name, fromlist=[cls_name])
+                cls = getattr(mod, cls_name)
+                self._pages[key] = cls()
             else:
                 return
             self._stack.addWidget(self._pages[key])
+
         w = self._pages[key]
         if hasattr(w, 'refresh'):
             w.refresh()
@@ -146,13 +131,11 @@ class MainWindow(QWidget):
     @safe_slot("MainWindow._restyle")
     def _restyle(self):
         p = theme_manager.palette
+        s = theme_manager.font_size
         try:
-            self._sidebar.setStyleSheet(f"""
-                #sidebar {{ background-color: {p.surface_variant}; border-right: 1px solid {p.border}; }}
-            """)
-            self._user_label.setStyleSheet(f"""
-                font-size: {theme_manager.font_size(13)}px; font-weight: bold;
-                color: {p.text_strong}; padding: 0 5px;
-            """)
+            self._sidebar.setStyleSheet(
+                f"#sidebar {{ background-color: {p.surface_variant}; "
+                f"border-right: {ds.border_width}px solid {p.border}; }}")
+            self._stack.setStyleSheet(f"background: {p.background}; border: none;")
         except RuntimeError:
             pass

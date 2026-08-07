@@ -1,8 +1,7 @@
-"""PaymentList — liste et ajout de paiements."""
+"""PaymentList — conforme aux 6 skills design Larc."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QDate
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QScrollArea, QDialog, QFormLayout, QLineEdit, QComboBox,
@@ -12,67 +11,57 @@ from PySide6.QtWidgets import (
 from larccommon.database import db
 from larccommon.design_system import ds
 from larccommon.theme import theme_manager
-from larccommon.icons import icon as md3_icon
 from larccommon.safe_slot import safe_slot
 
 
-def _fmt_fcfa(amount: int) -> str:
-    if amount >= 1000000:
-        return f"{amount/1000000:.1f} M"
-    if amount >= 1000:
-        return f"{amount/1000:,.0f} K".replace(",", " ")
-    return str(amount)
+def _fmt(amount: int) -> str:
+    if amount >= 1000000: return f"{amount / 1000000:.1f} M"
+    return f"{amount // 1000:,} K".replace(",", " ")
 
 
 class _PaymentForm(QDialog):
-    """Dialogue d'ajout de paiement avec recherche eleve."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Enregistrer un paiement")
-        self.setMinimumSize(480, 380)
+        self.setMinimumSize(ds.golden_width(ds.sidebar_width), ds.sidebar_width)
         self._student_id: int | None = None
         self._setup_ui()
 
     def _setup_ui(self):
         p = theme_manager.palette
+        s = theme_manager.font_size
         layout = QVBoxLayout(self)
         layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
-        layout.setSpacing(ds.space_md)
+        layout.setSpacing(ds.space_sm)
 
-        fstyle = f"""
-            QLineEdit, QComboBox {{
-                background: {p.background}; border: 1px solid {p.outline};
-                border-radius: {ds.radius_xs}px; padding: {ds.space_sm}px;
-                color: {p.text_strong}; font-size: {theme_manager.font_size(13)}px;
-            }}
-        """
+        self.setStyleSheet(f"background: {p.surface};")
+        fstyle = (
+            f"background: {p.background}; border: {ds.border_width}px solid {p.outline}; "
+            f"border-radius: {ds.radius_xs}px; padding: {ds.space_sm}px; "
+            f"color: {p.text_strong}; font-size: {s(ds.font_body_md)}px;"
+        )
 
         # Recherche eleve
-        search_layout = QHBoxLayout()
-        self._search_input = QLineEdit()
-        self._search_input.setPlaceholderText("Nom, prenom ou email de l'eleve...")
-        self._search_input.setFixedHeight(ds.field_height)
-        self._search_input.setStyleSheet(fstyle)
-        self._search_input.textChanged.connect(self._on_search)
-        search_layout.addWidget(self._search_input, 1)
+        self._search = QLineEdit()
+        self._search.setPlaceholderText("Nom, prenom ou email de l'eleve...")
+        self._search.setFixedHeight(ds.field_height)
+        self._search.setStyleSheet(fstyle)
+        self._search.textChanged.connect(self._on_search)
+        layout.addWidget(self._search)
 
-        layout.addLayout(search_layout)
-
-        # Resultats recherche
         self._results = QWidget()
-        self._results_layout = QVBoxLayout(self._results)
-        self._results_layout.setContentsMargins(0, 0, 0, 0)
-        self._results_layout.setSpacing(2)
+        self._rl = QVBoxLayout(self._results)
+        self._rl.setContentsMargins(0, 0, 0, 0)
+        self._rl.setSpacing(ds.border_width)
         self._results.setVisible(False)
         layout.addWidget(self._results)
 
-        # Eleve selectionne
-        self._selected_lbl = QLabel("Aucun eleve selectionne")
-        self._selected_lbl.setStyleSheet(f"font-weight: bold; color: {p.primary}; font-size: {theme_manager.font_size(13)}px;")
-        layout.addWidget(self._selected_lbl)
+        self._selected = QLabel("Aucun eleve selectionne")
+        self._selected.setStyleSheet(
+            f"font-weight: bold; color: {p.primary}; font-size: {s(ds.font_label_lg)}px; border: none;")
+        layout.addWidget(self._selected)
 
-        # Formulaire
         form = QFormLayout()
         form.setSpacing(ds.space_sm)
 
@@ -96,7 +85,7 @@ class _PaymentForm(QDialog):
         form.addRow("Mode :", self._f_method)
 
         self._f_ref = QLineEdit()
-        self._f_ref.setPlaceholderText("Reference (cheque/virement)")
+        self._f_ref.setPlaceholderText("Reference")
         self._f_ref.setFixedHeight(ds.field_height)
         self._f_ref.setStyleSheet(fstyle)
         form.addRow("Reference :", self._f_ref)
@@ -110,79 +99,73 @@ class _PaymentForm(QDialog):
         layout.addLayout(form)
         layout.addStretch()
 
-        # Boutons
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
         cancel = QPushButton("Annuler")
         cancel.setCursor(Qt.PointingHandCursor)
         cancel.setFixedHeight(ds.button_height)
+        cancel.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {p.text_strong}; "
+            f"border: {ds.border_width}px solid {p.outline}; "
+            f"border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_m3}px; "
+            f"font-size: {s(ds.font_label_lg)}px; }}"
+            f"QPushButton:hover {{ background: {p.surface_variant}; }}")
         cancel.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel)
+        btn_row.addWidget(cancel)
 
         save = QPushButton("Enregistrer")
         save.setCursor(Qt.PointingHandCursor)
         save.setFixedHeight(ds.button_height)
-        save.setStyleSheet(f"""
-            QPushButton {{ background: {p.primary}; color: white; border: none;
-            border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_md}px;
-            font-size: {theme_manager.font_size(13)}px; font-weight: bold; }}
-        """)
+        save.setStyleSheet(
+            f"QPushButton {{ background: {p.primary}; color: {p.on_primary}; border: none; "
+            f"border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_m3}px; "
+            f"font-size: {s(ds.font_label_lg)}px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {p.primary}; }}")
         save.clicked.connect(self._on_save)
-        btn_layout.addWidget(save)
-        layout.addLayout(btn_layout)
+        btn_row.addWidget(save)
+        layout.addLayout(btn_row)
 
     @safe_slot("_PaymentForm._on_search")
     def _on_search(self):
-        query = self._search_input.text().strip()
-        # Clear
-        while self._results_layout.count():
-            item = self._results_layout.takeAt(0)
-            if item.widget():
+        q = self._search.text().strip()
+        while self._rl.count():
+            item = self._rl.takeAt(0)
+            if item and item.widget():
                 item.widget().deleteLater()
-
-        if len(query) < 2:
+        if len(q) < 2:
             self._results.setVisible(False)
             return
-
         conn = db.server_conn
         if not conn:
             return
         cur = conn.cursor()
         cur.execute("""
-            SELECT a.id, a.first_name, a.last_name, a.email, c.label as class_label
+            SELECT a.id, a.first_name, a.last_name, a.email, c.label
             FROM larcauth_aecuser a
             JOIN larcauth_student s ON s.aecuser_ptr_id = a.id
             LEFT JOIN larcauth_classroom c ON c.id = s.s_classroom_id
             WHERE s.enabled = true AND (
-                a.last_name ILIKE %s OR a.first_name ILIKE %s OR a.email ILIKE %s
-            )
+                a.last_name ILIKE %s OR a.first_name ILIKE %s OR a.email ILIKE %s)
             ORDER BY a.last_name LIMIT 8
-        """, (f"%{query}%", f"%{query}%", f"%{query}%"))
-
-        rows = cur.fetchall()
-        if not rows:
-            self._results.setVisible(False)
-            return
-
-        for row in rows:
-            sid, fn, ln, email, cls = row
+        """, (f"%{q}%", f"%{q}%", f"%{q}%"))
+        for row in cur.fetchall():
+            sid, fn, ln, _, cls = row
             btn = QPushButton(f"{ln} {fn}  —  {cls or ''}")
             btn.setFlat(True)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setStyleSheet(f"""
-                QPushButton {{ text-align: left; padding: 4px 8px; color: {theme_manager.palette.text_strong}; }}
-                QPushButton:hover {{ background: {theme_manager.palette.surface_variant}; }}
-            """)
-            btn.clicked.connect(lambda checked, i=sid, t=f"{ln} {fn}": self._select_student(i, t))
-            self._results_layout.addWidget(btn)
-
+            btn.setStyleSheet(
+                f"QPushButton {{ text-align: left; padding: {ds.space_xxs}px {ds.space_xs}px; "
+                f"color: {theme_manager.palette.text_strong}; font-size: {theme_manager.font_size(12)}px; }}"
+                f"QPushButton:hover {{ background: {theme_manager.palette.surface_variant}; }}")
+            btn.clicked.connect(lambda checked, i=sid, t=f"{ln} {fn}": self._select(i, t))
+            self._rl.addWidget(btn)
         self._results.setVisible(True)
 
-    def _select_student(self, sid: int, name: str):
+    def _select(self, sid: int, name: str):
         self._student_id = sid
-        self._selected_lbl.setText(f"Eleve : {name}")
+        self._selected.setText(f"Eleve : {name}")
         self._results.setVisible(False)
-        self._search_input.setText(name)
+        self._search.setText(name)
 
     @safe_slot("_PaymentForm._on_save")
     def _on_save(self):
@@ -194,66 +177,66 @@ class _PaymentForm(QDialog):
         except ValueError:
             QMessageBox.warning(self, "Erreur", "Montant invalide.")
             return
-
         conn = db.server_conn
         if not conn:
             return
         cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO compta_payment (student_id, amount, payment_date, payment_method, reference, notes)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (self._student_id, amount,
-              self._f_date.date().toPython(),
-              self._f_method.currentText(),
-              self._f_ref.text().strip() or None,
-              self._f_note.text().strip() or None))
+        cur.execute("""INSERT INTO compta_payment (student_id, amount, payment_date, payment_method, reference, notes)
+            VALUES (%s, %s, %s, %s, %s, %s)""",
+            (self._student_id, amount, self._f_date.date().toPython(),
+             self._f_method.currentText(), self._f_ref.text().strip() or None,
+             self._f_note.text().strip() or None))
         self.accept()
 
 
 class PaymentList(QScrollArea):
-    """Liste des paiements avec filtre et recherche."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWidgetResizable(True)
         self.setFrameShape(QScrollArea.NoFrame)
-        self.setStyleSheet(f"background: {theme_manager.palette.background}; border: none;")
+        self.setObjectName("payments")
+        ds.theme_changed.connect(self._restyle)
+        self._restyle()
 
         self._container = QWidget()
         self._layout = QVBoxLayout(self._container)
-        self._layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
-        self._layout.setSpacing(ds.space_md)
+        self._layout.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        self._layout.setSpacing(ds.space_sm)
         self.setWidget(self._container)
-
         self._setup_ui()
         self.refresh()
 
+    @safe_slot("PaymentList._restyle")
+    def _restyle(self):
+        self.setStyleSheet(
+            f"#payments {{ background: {theme_manager.palette.background}; border: none; }}")
+
     def _setup_ui(self):
         p = theme_manager.palette
+        s = theme_manager.font_size
 
-        # Header
         hdr = QHBoxLayout()
         title = QLabel("Paiements enregistres")
-        title.setStyleSheet(f"font-size: {theme_manager.font_size(18)}px; font-weight: bold; color: {p.text_strong};")
+        title.setStyleSheet(
+            f"font-size: {s(ds.font_title_md)}px; font-weight: bold; color: {p.text_strong}; border: none;")
         hdr.addWidget(title)
         hdr.addStretch()
 
         add_btn = QPushButton("+ Nouveau paiement")
         add_btn.setCursor(Qt.PointingHandCursor)
         add_btn.setFixedHeight(ds.button_height)
-        add_btn.setStyleSheet(f"""
-            QPushButton {{ background: {p.primary}; color: white; border: none;
-            border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_md}px;
-            font-size: {theme_manager.font_size(12)}px; font-weight: bold; }}
-            QPushButton:hover {{ background: {p.primary}; }}
-        """)
+        add_btn.setStyleSheet(
+            f"QPushButton {{ background: {p.primary}; color: {p.on_primary}; border: none; "
+            f"border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_m3}px; "
+            f"font-size: {s(12)}px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {p.primary}; }}")
         add_btn.clicked.connect(self._on_add)
         hdr.addWidget(add_btn)
         self._layout.addLayout(hdr)
 
-        # Liste
         self._list_layout = QVBoxLayout()
-        self._list_layout.setSpacing(ds.space_xs)
+        self._list_layout.setSpacing(ds.border_width)
         self._layout.addLayout(self._list_layout)
 
     def refresh(self):
@@ -261,9 +244,10 @@ class PaymentList(QScrollArea):
 
     def _load(self):
         p = theme_manager.palette
+        s = theme_manager.font_size
         while self._list_layout.count():
             item = self._list_layout.takeAt(0)
-            if item.widget():
+            if item and item.widget():
                 item.widget().deleteLater()
 
         conn = db.server_conn
@@ -273,54 +257,39 @@ class PaymentList(QScrollArea):
         cur.execute("""
             SELECT cp.id, a.first_name, a.last_name, cp.amount, cp.payment_date,
                    cp.payment_method, cp.reference
-            FROM compta_payment cp
-            JOIN larcauth_aecuser a ON a.id = cp.student_id
+            FROM compta_payment cp JOIN larcauth_aecuser a ON a.id = cp.student_id
             ORDER BY cp.payment_date DESC, cp.id DESC LIMIT 100
         """)
-
         for row in cur.fetchall():
-            pid, fn, ln, amount, date, method, ref = row
-            row_w = QWidget()
-            rl = QHBoxLayout(row_w)
+            _, fn, ln, amount, date, method, ref = row
+            rw = QWidget()
+            rl = QHBoxLayout(rw)
             rl.setContentsMargins(ds.space_sm, ds.space_xs, ds.space_sm, ds.space_xs)
-            rl.setSpacing(ds.space_md)
+            rl.setSpacing(ds.space_m3)
 
-            # Date
-            d = QLabel(str(date))
-            d.setFixedWidth(90)
-            d.setStyleSheet(f"font-size: {theme_manager.font_size(11)}px; color: {p.text_soft};")
-            rl.addWidget(d)
+            for text, w, color, size, bold in [
+                (str(date), ds.space_xxl - ds.space_lg, p.text_soft, 11, False),
+                (f"{ln} {fn}", ds.space_xxxl - ds.space_md, p.text_strong, 12, True),
+                (_fmt(amount), ds.space_xxl + ds.space_md, p.success, 13, True),
+                (method, ds.space_xxl, p.text_soft, 11, False),
+            ]:
+                lbl = QLabel(text)
+                lbl.setFixedWidth(w)
+                lbl.setStyleSheet(
+                    f"font-size: {s(size)}px; {'font-weight: bold;' if bold else ''} "
+                    f"color: {color}; border: none;")
+                rl.addWidget(lbl)
 
-            # Nom
-            n = QLabel(f"{ln} {fn}")
-            n.setFixedWidth(180)
-            n.setStyleSheet(f"font-size: {theme_manager.font_size(12)}px; font-weight: bold; color: {p.text_strong};")
-            rl.addWidget(n)
-
-            # Montant
-            m = QLabel(_fmt_fcfa(amount))
-            m.setFixedWidth(100)
-            m.setStyleSheet(f"font-size: {theme_manager.font_size(13)}px; font-weight: bold; color: {p.success};")
-            rl.addWidget(m)
-
-            # Mode
-            mode_lbl = QLabel(method)
-            mode_lbl.setFixedWidth(100)
-            mode_lbl.setStyleSheet(f"font-size: {theme_manager.font_size(11)}px; color: {p.text_soft};")
-            rl.addWidget(mode_lbl)
-
-            # Reference
             if ref:
-                ref_lbl = QLabel(ref)
-                ref_lbl.setStyleSheet(f"font-size: {theme_manager.font_size(10)}px; color: {p.text_soft};")
-                rl.addWidget(ref_lbl)
+                rl2 = QLabel(ref)
+                rl2.setStyleSheet(f"font-size: {s(10)}px; color: {p.text_soft}; border: none;")
+                rl.addWidget(rl2)
 
             rl.addStretch()
-            row_w.setStyleSheet(f"""
-                QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}
-                QWidget:hover {{ background: {p.surface_variant}; }}
-            """)
-            self._list_layout.addWidget(row_w)
+            rw.setStyleSheet(
+                f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}"
+                f"QWidget:hover {{ background: {p.surface_variant}; }}")
+            self._list_layout.addWidget(rw)
 
         self._list_layout.addStretch()
 
