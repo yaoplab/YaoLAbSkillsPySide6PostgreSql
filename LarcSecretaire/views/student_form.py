@@ -459,7 +459,7 @@ class StudentForm(ThemedWidget):
         self._refresh_detail_badges(sid)
 
     def _refresh_detail_badges(self, sid: int):
-        """Colore les 4 cercles D/M/P/E selon les flags de validation."""
+        """Colore les 4 cercles D/M/P/E : P verifie is_payer sur un parent lie."""
         if not hasattr(self, "_detail_badges") or not self._detail_badges:
             return
         conn = db.server_conn
@@ -473,6 +473,19 @@ class StudentForm(ThemedWidget):
             val = row[0] if row and row[0] else {}
             if isinstance(val, str):
                 val = _json.loads(val)
+
+            # Badge P : parent payeur (requete live, pas JSONB)
+            has_payer = False
+            try:
+                cur.execute(
+                    "SELECT 1 FROM larcauth_student_parent sp "
+                    "JOIN larcauth_parent p ON p.aecuser_ptr_id = sp.parent_id "
+                    "WHERE sp.student_id = %s AND p.is_payer = TRUE AND p.enabled = TRUE LIMIT 1",
+                    (sid,))
+                has_payer = cur.fetchone() is not None
+            except Exception:
+                pass  # fallback : garder la valeur JSONB
+
             for flag_key, (badge_key, circle) in [
                 ("dossier", ("dossier_valid", self._detail_badges.get("dossier_valid"))),
                 ("parent",  ("parent_valid",  self._detail_badges.get("parent_valid"))),
@@ -481,8 +494,13 @@ class StudentForm(ThemedWidget):
             ]:
                 if circle is None:
                     continue
-                entry = val.get(flag_key, {}) if isinstance(val, dict) else {}
-                ok = entry.get("ok", False)
+                # Badge P : verifier la presence d'un parent payeur
+                if badge_key == "parent_valid":
+                    ok = has_payer
+                else:
+                    entry = val.get(flag_key, {}) if isinstance(val, dict) else {}
+                    ok = entry.get("ok", False)
+
                 if ok:
                     circle.setStyleSheet(
                         f"background: {ds.p.success}; color: {ds.p.on_error if hasattr(ds.p, 'on_error') else '#FFFFFF'}; "
