@@ -165,9 +165,9 @@ class StudentCard(QFrame):
         p = theme_manager.palette
         c = self._cfg
         colors = {
-            "retard": (p.error, p.error_container),
-            "normal": (p.tertiary, p.surface),
-            "solde":  (p.success, p.surface),
+            "retard": (p.error, p.error_container),     # rouge
+            "normal": (p.success, p.surface),            # vert
+            "solde":  (p.primary, p.surface),            # bleu
         }
         border_c, bg_c = colors.get(status, (p.outline, p.surface))
         self.setStyleSheet(
