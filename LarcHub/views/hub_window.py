@@ -242,6 +242,9 @@ class HubWindow(QWidget):
         has_supervision = tf.get('supervisor') or tf.get('coordinator') or tf.get('director')
         sections.append(('supervision', 'Supervision', has_supervision, conn_ok))
 
+        has_bulletin = tf.get('secretary') or tf.get('director') or tf.get('coordinator')
+        sections.append(('bulletin', 'Bulletins', has_bulletin, False))
+
         has_secretariat = tf.get('secretary') or tf.get('director')
         sections.append(('secretariat', 'Secrétariat', has_secretariat, conn_ok))
 
@@ -250,9 +253,6 @@ class HubWindow(QWidget):
 
         has_compta = tf.get('director') or tf.get('secretary')
         sections.append(('compta', 'Comptabilite', has_compta, conn_ok))
-
-        has_bulletin = tf.get('secretary') or tf.get('director') or tf.get('coordinator')
-        sections.append(('bulletin', 'Bulletins', has_bulletin, False))
 
         has_config = tf.get('director') or tf.get('coordinator')
         sections.append(('config', 'Configuration', has_config, False))
