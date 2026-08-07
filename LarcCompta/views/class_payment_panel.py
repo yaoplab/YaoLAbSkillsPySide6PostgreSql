@@ -106,12 +106,14 @@ class ClassPaymentPanel(QWidget):
             card = StudentCard(s["id"], s["last_name"], s["first_name"], DEFAULT_CONFIG)
             card.clicked.connect(lambda sid=s["id"]: self.student_selected.emit(sid))
             card.set_payment_status(s["status"])
-            # Cacher les 4 badges D/M/P/E (spécifique secrétaire, inutile en compta)
             for j in range(card._badges_row.count()):
                 w = card._badges_row.itemAt(j).widget()
                 if w:
                     w.hide()
-            self._grid_layout.addWidget(card, i // cols, i % cols, Qt.AlignCenter)
+            row = i // cols
+            self._grid_layout.addWidget(card, row, i % cols, Qt.AlignCenter)
+            self._grid_layout.setRowStretch(row, 0)
+            self._grid_layout.setRowMinimumHeight(row, DEFAULT_CONFIG.card_h)
 
     def _clear_grid(self):
         while self._grid_layout.count():
@@ -132,7 +134,6 @@ class ClassPaymentPanel(QWidget):
             return
         avail_w = self.width()
         cols = max(1, (avail_w + DEFAULT_CONFIG.spacing) // (DEFAULT_CONFIG.card_w + DEFAULT_CONFIG.spacing)) if avail_w > 100 else 3
-        # Extraire toutes les cartes en utilisant takeAt (pas removeWidget)
         cards = []
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
@@ -142,6 +143,9 @@ class ClassPaymentPanel(QWidget):
                     cards.append(w)
                 else:
                     w.deleteLater()
-        # Replacer avec le bon nombre de colonnes
+        # Replacer et forcer la hauteur des lignes (pas d'espacement excessif)
         for idx, card in enumerate(cards):
-            self._grid_layout.addWidget(card, idx // cols, idx % cols, Qt.AlignCenter)
+            row = idx // cols
+            self._grid_layout.addWidget(card, row, idx % cols, Qt.AlignCenter)
+            self._grid_layout.setRowStretch(row, 0)
+            self._grid_layout.setRowMinimumHeight(row, DEFAULT_CONFIG.card_h)
