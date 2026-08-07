@@ -157,10 +157,12 @@ class StudentsList(QScrollArea):
             # Barre progression
             bar_w = ds.space_xxxl - ds.space_lg
             bar_bg = QFrame()
+            bar_bg.setAttribute(Qt.WA_StyledBackground, True)
             bar_bg.setFixedSize(bar_w, ds.space_sm)
             bar_bg.setStyleSheet(
                 f"background: {p.outline_variant}; border-radius: {ds.radius_xs // 2}px;")
             bar_fill = QFrame(bar_bg)
+            bar_fill.setAttribute(Qt.WA_StyledBackground, True)
             bar_fill.setFixedSize(max(ds.space_xxs, int(bar_w * pct / 100)), ds.space_sm)
             bar_fill.setStyleSheet(
                 f"background: {p.success if pct >= 100 else p.primary if pct >= 40 else p.error}; "

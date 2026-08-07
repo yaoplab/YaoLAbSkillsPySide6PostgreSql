@@ -41,7 +41,8 @@ class StaffEventDialog(QDialog):
 
         name = staff_data.get("full_name", staff_data.get("last_name", ""))
         self.setWindowTitle(f"Événement — {name}")
-        self.setMinimumSize(500, 400)
+        _w = ds.sidebar_width + ds.golden_width(ds.sidebar_width)  # 610
+        self.setMinimumSize(ds.golden_width(ds.sidebar_width), _w // 2 + ds.space_xl)  # 377×357
         self.setStyleSheet(f"background: {theme_manager.palette.surface};")
         self._setup_ui()
 
@@ -123,7 +124,7 @@ class StaffEventDialog(QDialog):
         # Note
         layout.addWidget(QLabel("Note :"))
         self._note = QTextEdit()
-        self._note.setFixedHeight(100)
+        self._note.setFixedHeight(theme_manager.image.add_btn)  # 100px
         self._note.setStyleSheet(f"""
             QTextEdit {{
                 background: {theme_manager.palette.background};

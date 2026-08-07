@@ -43,7 +43,9 @@ class StaffFormDialog(QDialog):
         self._checkboxes: dict[str, QCheckBox] = {}
 
         self.setWindowTitle("Ajouter un membre" if self._is_new else "Modifier le membre")
-        self.setMinimumSize(500, 420 if self._is_staff else 350)
+        _w = ds.sidebar_width + ds.golden_width(ds.sidebar_width)  # 610
+        _h = _w // 2 + ds.space_xl if self._is_staff else _w // 2  # 357 ou 305
+        self.setMinimumSize(ds.golden_width(ds.sidebar_width), _h)
         self.setStyleSheet(f"background: {theme_manager.palette.surface};")
         self._setup_ui()
 

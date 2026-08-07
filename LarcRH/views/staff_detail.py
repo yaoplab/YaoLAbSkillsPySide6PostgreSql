@@ -55,16 +55,16 @@ class StaffDetail(QWidget):
             os.path.join(os.path.dirname(__file__), "..", "..",
                          "LarcSuperviseur", "photos", f"{photo_id}.png"))
         photo = QLabel()
-        photo.setFixedSize(120, 120)
+        photo.setFixedSize(ds.space_xxxl, ds.space_xxxl)  # 136px Fibonacci
         photo.setAlignment(Qt.AlignCenter)
         pix = QPixmap(photo_path) if os.path.exists(photo_path) else None
         if pix is None or pix.isNull():
             from LarcRH.views.staff_grid import _make_avatar
-            pix = _make_avatar(self._staff.get("full_name", ""), 120)
+            pix = _make_avatar(self._staff.get("full_name", ""), ds.space_xxxl)
         else:
-            pix = pix.scaled(120, 120, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            pix = pix.scaled(ds.space_xxxl, ds.space_xxxl, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         photo.setPixmap(pix)
-        photo.setStyleSheet("border-radius: 60px;")
+        photo.setStyleSheet(f"border-radius: {ds.space_xxxl // 2}px;")
         top_row.addWidget(photo)
 
         # Infos
@@ -174,6 +174,7 @@ class StaffDetail(QWidget):
             for row in rows:
                 evt_type, evt_at, note, source, validated = row
                 card = QFrame()
+                card.setAttribute(Qt.WA_StyledBackground, True)
                 card.setStyleSheet(f"""
                     QFrame {{
                         background: {theme_manager.palette.surface};
