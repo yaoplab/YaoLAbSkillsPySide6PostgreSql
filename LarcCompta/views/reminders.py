@@ -101,14 +101,17 @@ class _ReminderForm(QDialog):
         conn = db.server_conn
         if not conn: return
         cur = conn.cursor()
+        # Trouver le parent payeur lie a cet eleve
         cur.execute("SELECT p.id FROM larcauth_aecuser p "
                     "JOIN larcauth_student_parent sp ON sp.parent_id = p.id "
+                    "JOIN larcauth_parent lp ON lp.aecuser_ptr_id = p.id AND lp.is_payer = TRUE "
                     "WHERE sp.student_id = %s LIMIT 1", (self._sid,))
         pr = cur.fetchone()
+        if not pr:
+            return  # pas de parent payeur = pas de rappel
         cur.execute("""INSERT INTO compta_reminder (parent_id, reminder_type, message)
             VALUES (%s, %s, %s)""",
-            (pr[0] if pr else self._sid,
-             self._f_type.currentText(), self._f_msg.toPlainText().strip()))
+            (pr[0], self._f_type.currentText(), self._f_msg.toPlainText().strip()))
         self.accept()
 
 
