@@ -7,7 +7,7 @@ depends_on: [design-tokens, color-rules, theme-reactivity]
 applies_to: [LarcSuperviseur, LarcSecretaire, LarcProf, LarcHub, LarcDesign]
 linters: [lint_qss_hardcoding.py]
 reviewers: [design-reviewer]
-subsystems: [Q, Q7, Q8, Q9, Q10, Q11, Q12, Q13, Q14, Q15, Q16, Q17, Q18, Q19, Q20, Q21]
+subsystems: [Q, Q7, Q8, Q9, Q10, Q11, Q12, Q13, Q14, Q15, Q16, Q17, Q18, Q19, Q20, Q21, Q22]
 ---
 
 # Skill: Ergonomics — Patterns de Composition M3+Fibonacci
@@ -1273,9 +1273,76 @@ class EditFormView(ThemedWidget):
 | Q21b | **Header sticky** | Header absent ou dans le scroll | Header `ds.header_height` avec photo + nom + actions (Q19b) hors scroll | 🔴 P0 |
 | Q21c | **Sections en cartes** | Champs sans regroupement logique | Une carte Q7 par groupe logique (identité, adresse, contacts...) | 🟡 P1 |
 
+### Q22 — Detail Card Header : Photo + Identité 🇫🇷
+
+Règle canonique pour la présentation d'une personne (élève, enseignant, staff) en entête de fiche détail.
+
+**Layout obligatoire** :
+
+```
+┌──────────────────────────────────────────────────────┐
+│  ┌──────────┐  Nom Prénom (gras, title_large)       │
+│  │          │  Classe / Poste (label_large, text_soft)│
+│  │  PHOTO   │  ID : XXYYZZ (label_small, text_soft)  │
+│  │  F₁₂×F₁₂│                                         │
+│  └──────────┘                                         │
+└──────────────────────────────────────────────────────┘
+```
+
+**Contraintes** :
+
+| # | Règle | ❌ Interdit | ✅ Obligatoire | Gravité |
+|---|---|---|---|---|
+| Q22a | **Photo à gauche** | Photo centrée ou au-dessus du nom | Photo `F₁₂`×`F₁₂` (`ds.icon_lg` = 52×52) ou `F₁₃`×`F₁₃` (`ds.photo_size` = 89×89) selon le contexte | 🔴 P0 |
+| Q22b | **Texte aligné à gauche** | Texte centré ou étalé | Les labels nom/classe/ID sont dans un `QVBoxLayout` aligné `Qt.AlignLeft`, leur bord gauche touchant le bord droit de la photo | 🔴 P0 |
+| Q22c | **Nom en premier** | Classe/ID avant le nom | `title_large` (18px) ou `headline_small` (22px) selon contexte, **bold**, `color: {p.text_strong}` | 🔴 P0 |
+| Q22d | **Classe/Poste en second** | Classe en gras ou taille > nom | `label_large` (13px) ou `body_medium` (14px), `color: {p.text_soft}` | 🔴 P0 |
+| Q22e | **ID en dernier** | ID absent (utilisé pour les logs, recherches, support) | `label_small` (11px), `color: {p.text_soft}`, format "ID : {valeur}" | 🟡 P1 |
+| Q22f | **Spacing vertical** | Texte collé sans espacement | `setSpacing(ds.space_xxs)` (4px) entre les 3 lignes de texte | 🔴 P0 |
+| Q22g | **Responsive** | Photo qui déborde | Si hauteur < 120px : passer en `icon_lg` (52×52) + `body_medium` (14px) ; si hauteur < 80px : passer en `icon_btn` (18×18) + `label_large` (13px) | 🟡 P2 |
+
+```python
+# ✅ Implémentation canonique Q22
+p = theme_manager.palette
+s = theme_manager.font_size
+header = QWidget()
+header_layout = QHBoxLayout(header)
+header_layout.setSpacing(ds.space_md)
+
+# Photo
+photo = QLabel()
+photo.setFixedSize(ds.icon_lg, ds.icon_lg)  # 52×52 — Q22a
+photo.setPixmap(get_photo(sid))
+photo.setStyleSheet(
+    f"border-radius: {ds.radius_sm}px; background: {p.primary_container};")
+header_layout.addWidget(photo)
+
+# Identité — Q22b (aligné à gauche, contre la photo)
+identity = QVBoxLayout()
+identity.setSpacing(ds.space_xxs)  # 4px — Q22f
+
+name_lbl = QLabel(f"{first_name} {last_name}")
+name_lbl.setStyleSheet(
+    f"font-size: {s(18)}px; font-weight: bold; color: {p.text_strong}; border: none;")
+identity.addWidget(name_lbl)  # Q22c
+
+class_lbl = QLabel(class_label or "—")
+class_lbl.setStyleSheet(
+    f"font-size: {s(ds.font_label_lg)}px; color: {p.text_soft}; border: none;")
+identity.addWidget(class_lbl)  # Q22d
+
+id_lbl = QLabel(f"ID : {student_id}")
+id_lbl.setStyleSheet(
+    f"font-size: {s(ds.font_label_sm)}px; color: {p.text_soft}; border: none;")
+identity.addWidget(id_lbl)  # Q22e
+
+header_layout.addLayout(identity, 1)
+header_layout.addStretch()
+```
+
 ---
 
-## Checklist Q15-Q21
+## Checklist Q15-Q22
 
 - [ ] Q15 : Ratio sidebar/contenu = `ds.sidebar_width` / stretch 1 → 1/φ
 - [ ] Q15 : Header = EXACTEMENT `ds.header_height` (52px = F₁₂)
