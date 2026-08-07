@@ -177,6 +177,7 @@ class MainWindow(QWidget):
 
         # Sidebar gauche — SidebarWidget partagé (Sous-système K)
         _sections = [
+            (_("sidebar.section_primaire"), [("PYP", "PYP"), ("PP", "PP")]),
             (_("sidebar.section_college"), [("PEI", "PEI"), ("MYP", "MYP")]),
             (_("sidebar.section_lycee"), [("DP", "DPFr"), ("DPEn", "DPEn")]),
         ]
@@ -572,13 +573,15 @@ class MainWindow(QWidget):
         s = theme_manager.font_size
         d = theme_manager.design
         prog_style = {
-            "PEI": (p.primary, p.primary_container, p.on_primary, "PEI"),
-            "MYP": (p.secondary, p.secondary_container, p.on_secondary, "MYP"),
+            "PYP":  (p.primary, p.primary_container, p.on_primary, "PYP"),
+            "PP":   (p.secondary, p.secondary_container, p.on_secondary, "PP"),
+            "PEI":  (p.primary, p.primary_container, p.on_primary, "PEI"),
+            "MYP":  (p.secondary, p.secondary_container, p.on_secondary, "MYP"),
             "DPFr": (p.error, p.error_container, p.on_error, "DP"),
             "DPEn": (p.tertiary, p.tertiary_container, p.on_tertiary, "DPEn"),
         }
 
-        groups = {k: [] for k in ["PEI", "MYP", "DPEn", "DPFr"]}
+        groups = {k: [] for k in ["PYP", "PP", "PEI", "MYP", "DPEn", "DPFr"]}
         for cid, label, pid, sigle in self._classes:
             if sigle in groups:
                 groups[sigle].append((cid, label))
@@ -594,6 +597,7 @@ class MainWindow(QWidget):
             return b
 
         sections = [
+            (_("sidebar.section_primaire"), [("PYP", "PYP"), ("PP", "PP")]),
             (_("sidebar.section_college"), [("PEI", "PEI"), ("MYP", "MYP")]),
             (_("sidebar.section_lycee"), [("DP", "DPFr"), ("DPEn", "DPEn")]),
         ]
@@ -673,8 +677,9 @@ class MainWindow(QWidget):
             self._select_btn(None)
             self._show_group_mode(f"grp_{prog.lower()}")
         else:
-            # Clic sur section (Collège/Lycée)
+            # Clic sur section (Primaire/Collège/Lycée)
             mode_map = {
+                _("sidebar.section_primaire"): "grp_primaire",
                 _("sidebar.section_college"): "grp_college",
                 _("sidebar.section_lycee"): "grp_lycee",
             }
@@ -768,7 +773,7 @@ class MainWindow(QWidget):
                 FROM larcauth_classroom c
                 JOIN larcauth_level l ON l.id = c.fk_level_id
                 JOIN larcauth_program p ON p.id = l.fk_program_id
-                WHERE c.enabled = TRUE AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')
+                WHERE c.enabled = TRUE AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')
                 ORDER BY p.sigle, c.label
             """)
             self._classes = cur.fetchall()
@@ -848,7 +853,9 @@ class MainWindow(QWidget):
             cur = conn.cursor()
 
             if mode == "grp_all":
-                class_filter = "AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')"
+                class_filter = "AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')"
+            elif mode == "grp_primaire":
+                class_filter = "AND (p.sigle ILIKE 'PYP' OR p.sigle ILIKE 'PP')"
             elif mode == "grp_college":
                 class_filter = "AND (p.sigle ILIKE 'PEI' OR p.sigle ILIKE 'MYP')"
             elif mode == "grp_lycee":
@@ -1160,7 +1167,7 @@ class MainWindow(QWidget):
                     SELECT c.id, c.label FROM larcauth_classroom c
                     JOIN larcauth_level l ON l.id = c.fk_level_id
                     JOIN larcauth_program p ON p.id = l.fk_program_id
-                    WHERE c.enabled = TRUE AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')
+                    WHERE c.enabled = TRUE AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')
                     ORDER BY c.label
                 """)
                 for cid, clabel in cur.fetchall():
@@ -1183,7 +1190,9 @@ class MainWindow(QWidget):
                 self._history_filter_type.lineEdit().setText("")
 
             if mode == "grp_all":
-                class_filter = "AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')"
+                class_filter = "AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')"
+            elif mode == "grp_primaire":
+                class_filter = "AND (p.sigle ILIKE 'PYP' OR p.sigle ILIKE 'PP')"
             elif mode == "grp_college":
                 class_filter = "AND (p.sigle ILIKE 'PEI' OR p.sigle ILIKE 'MYP')"
             elif mode == "grp_lycee":

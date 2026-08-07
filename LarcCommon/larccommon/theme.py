@@ -428,10 +428,12 @@ class ThemeManager(QObject):
 # Usage : PROGRAM_STYLES["PEI"] → ("primary", "primary_container", "on_primary")
 # Chaque tuple = (rôle_fg, rôle_bg, rôle_on_fg)
 PROGRAM_STYLES: dict[str, tuple[str, str, str]] = {
-    "PEI":  ("primary",   "primary_container",   "on_primary"),
-    "MYP":  ("secondary", "secondary_container",  "on_secondary"),
-    "DPFr": ("error",     "error_container",      "on_error"),
-    "DPEn": ("tertiary",  "tertiary_container",   "on_tertiary"),
+    "PYP":  ("primary",              "primary_container",         "on_primary"),
+    "PP":   ("secondary",            "secondary_container",       "on_secondary"),
+    "PEI":  ("primary",              "primary_container",         "on_primary"),
+    "MYP":  ("secondary",            "secondary_container",       "on_secondary"),
+    "DPFr": ("error",                "error_container",           "on_error"),
+    "DPEn": ("tertiary",             "tertiary_container",        "on_tertiary"),
 }
 
 # Cache lazy pour ds (évite l'import circulaire theme.py ↔ design_system.py)
