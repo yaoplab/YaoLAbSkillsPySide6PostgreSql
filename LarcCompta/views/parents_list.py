@@ -112,6 +112,9 @@ class ParentsList(QScrollArea):
                 SELECT COALESCE(SUM(cp.amount), 0) as paid_amount
                 FROM compta_payment cp WHERE cp.parent_id = par.id
             ) pay ON true
+            -- Note: paid_amount est le total verse par ce parent.
+            -- Les frais par eleve sont calcules par rapport au total familial.
+            -- Pour le solde de ce parent : total_paid - SUM(annual_fee).
             WHERE stu2.enabled = true
             GROUP BY par.id, par.first_name, par.last_name
             ORDER BY (COALESCE(SUM(CASE WHEN prog.id IN (13,23) THEN {LYCEE} ELSE {COLLEGE} END), 0)

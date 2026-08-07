@@ -399,27 +399,28 @@ class Dashboard(QScrollArea):
         total_du = n_co * COLLEGE_FEE + n_ly * LYCEE_FEE
         total_students = n_co + n_ly
 
-        # Paiements : repartition proportionnelle par eleve
-        # Chaque eleve recoit : parent_paid × (fee / total_du_parent)
+        # Paiements : chaque parent contribue une seule fois,
+        # reparti proportionnellement sur ses enfants dans le groupe filtre
+        flt_inner = flt.replace('AND p.', 'AND p.')
         cur.execute(f"""
-            SELECT COALESCE(SUM(
-                COALESCE(par.paid, 0) * (
-                    CASE WHEN p.id IN (11,12,21,22) THEN {COLLEGE_FEE} ELSE {LYCEE_FEE} END
-                    ) / NULLIF(par.total_du, 0)
-            ), 0)
-            FROM larcauth_student s
-            JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-            JOIN larcauth_level l ON l.id = c.fk_level_id
-            JOIN larcauth_program p ON p.id = l.fk_program_id
-            JOIN LATERAL (
-                SELECT COALESCE(SUM(cp.amount), 0) as paid,
-                       COALESCE(SUM(sf.annual_fee), 0) as total_du
-                FROM larcauth_student_parent sp
-                JOIN compta_payment cp ON cp.parent_id = sp.parent_id
-                JOIN compta_student_fee sf ON sf.student_id = sp.student_id
-                WHERE sp.student_id = s.aecuser_ptr_id
-            ) par ON true
-            WHERE s.enabled = true {flt}
+            SELECT COALESCE(SUM(part), 0) FROM (
+                SELECT par.id AS parent_id,
+                       SUM(cp.amount) AS total_paid,
+                       SUM(sf.annual_fee) AS total_du_family,
+                       SUM(cp.amount) * SUM(CASE WHEN p.id IN (13,23) THEN {LYCEE_FEE} ELSE {COLLEGE_FEE} END)
+                           / NULLIF(SUM(sf.annual_fee), 0) AS part
+                FROM larcauth_aecuser par
+                JOIN larcauth_student_parent sp ON sp.parent_id = par.id
+                JOIN larcauth_parent lp ON lp.aecuser_ptr_id = par.id AND lp.is_payer = TRUE
+                JOIN larcauth_student s ON s.aecuser_ptr_id = sp.student_id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                JOIN larcauth_level l ON l.id = c.fk_level_id
+                JOIN larcauth_program p ON p.id = l.fk_program_id
+                LEFT JOIN compta_payment cp ON cp.parent_id = par.id
+                LEFT JOIN compta_student_fee sf ON sf.student_id = sp.student_id
+                WHERE s.enabled = true {flt}
+                GROUP BY par.id
+            ) sub
         """)
         paid = int(cur.fetchone()[0] or 0)
         rem = max(0, total_du - paid)
@@ -460,7 +461,7 @@ class Dashboard(QScrollArea):
 
         flt = _build_filter(self._group_mode)
 
-        # Total du dans le groupe + paiements proportionnels
+        # Total du dans le groupe + paiements par parent
         cur.execute(f"""
             SELECT COUNT(*) FILTER (WHERE p.id IN (11,12,21,22)) * {COLLEGE_FEE} +
                    COUNT(*) FILTER (WHERE p.id IN (13,23)) * {LYCEE_FEE}
@@ -472,25 +473,24 @@ class Dashboard(QScrollArea):
         """)
         total_du = cur.fetchone()[0] or 0
 
+        # Paiements agreges par parent
         cur.execute(f"""
-            SELECT COALESCE(SUM(
-                COALESCE(par.paid, 0) * (
-                    CASE WHEN p.id IN (11,12,21,22) THEN {COLLEGE_FEE} ELSE {LYCEE_FEE} END
-                ) / NULLIF(par.total_du, 0)
-            ), 0)
-            FROM larcauth_student s
-            JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-            JOIN larcauth_level l ON l.id = c.fk_level_id
-            JOIN larcauth_program p ON p.id = l.fk_program_id
-            JOIN LATERAL (
-                SELECT COALESCE(SUM(cp.amount), 0) as paid,
-                       COALESCE(SUM(sf.annual_fee), 0) as total_du
-                FROM larcauth_student_parent sp
-                JOIN compta_payment cp ON cp.parent_id = sp.parent_id
-                JOIN compta_student_fee sf ON sf.student_id = sp.student_id
-                WHERE sp.student_id = s.aecuser_ptr_id
-            ) par ON true
-            WHERE s.enabled = true {flt}
+            SELECT COALESCE(SUM(part), 0) FROM (
+                SELECT par.id,
+                       COALESCE(SUM(cp.amount), 0) * COALESCE(SUM(CASE WHEN p.id IN (13,23) THEN {LYCEE_FEE} ELSE {COLLEGE_FEE} END), 0)
+                           / NULLIF(SUM(sf.annual_fee), 0) AS part
+                FROM larcauth_aecuser par
+                JOIN larcauth_student_parent sp ON sp.parent_id = par.id
+                JOIN larcauth_parent lp ON lp.aecuser_ptr_id = par.id AND lp.is_payer = TRUE
+                JOIN larcauth_student s ON s.aecuser_ptr_id = sp.student_id
+                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                JOIN larcauth_level l ON l.id = c.fk_level_id
+                JOIN larcauth_program p ON p.id = l.fk_program_id
+                LEFT JOIN compta_payment cp ON cp.parent_id = par.id
+                LEFT JOIN compta_student_fee sf ON sf.student_id = sp.student_id
+                WHERE s.enabled = true {flt}
+                GROUP BY par.id
+            ) sub
         """)
         paid = int(cur.fetchone()[0] or 0)
         rem = max(0, total_du - paid)
@@ -512,27 +512,30 @@ class Dashboard(QScrollArea):
         """)
         bar_data = []
         for cat, cnt, _ in cur.fetchall():
-            ids = COLLEGE_IDS if cat == 'College' else LYCEE_IDS
-            fee = COLLEGE_FEE if cat == 'College' else LYCEE_FEE
+            is_college = cat == 'College'
+            ids = COLLEGE_IDS if is_college else LYCEE_IDS
+            fee = COLLEGE_FEE if is_college else LYCEE_FEE
             id_list = ','.join(str(i) for i in ids)
             cur.execute(f"""
-                SELECT COALESCE(SUM(
-                    COALESCE(par.paid, 0) * {fee} / NULLIF(par.total_du, 0)
-                ), 0)
-                FROM larcauth_student s
-                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-                JOIN larcauth_level l ON l.id = c.fk_level_id
-                JOIN larcauth_program p ON p.id = l.fk_program_id
-                JOIN LATERAL (
-                    SELECT COALESCE(SUM(cp.amount), 0) as paid,
-                           COALESCE(SUM(sf.annual_fee), 0) as total_du
-                    FROM larcauth_student_parent sp2
-                    JOIN compta_payment cp ON cp.parent_id = sp2.parent_id
-                    JOIN compta_student_fee sf ON sf.student_id = sp2.student_id
-                    WHERE sp2.student_id = s.aecuser_ptr_id
-                ) par ON true
-                WHERE p.id IN ({id_list}) AND s.enabled = true {flt}
+                SELECT COALESCE(SUM(part), 0) FROM (
+                    SELECT COALESCE(SUM(cp.amount), 0) * {fee}
+                        / NULLIF(SUM(sf.annual_fee), 0) AS part
+                    FROM larcauth_aecuser par
+                    JOIN larcauth_student_parent sp ON sp.parent_id = par.id
+                    JOIN larcauth_parent lp ON lp.aecuser_ptr_id = par.id AND lp.is_payer = TRUE
+                    JOIN larcauth_student s ON s.aecuser_ptr_id = sp.student_id
+                    JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                    JOIN larcauth_level l ON l.id = c.fk_level_id
+                    JOIN larcauth_program p ON p.id = l.fk_program_id
+                    LEFT JOIN compta_payment cp ON cp.parent_id = par.id
+                    LEFT JOIN compta_student_fee sf ON sf.student_id = sp.student_id
+                    WHERE p.id IN ({id_list}) AND s.enabled = true {flt}
+                    GROUP BY par.id
+                ) sub
             """)
+            pad = int(cur.fetchone()[0] or 0)
+            pad = min(pad, cnt * fee)
+            bar_data.append((f"{cat} ({_fmt(fee)})", pad, cnt * fee))
             pad = int(cur.fetchone()[0] or 0)
             pad = min(pad, cnt * fee)
             bar_data.append((f"{cat} ({_fmt(fee)})", pad, cnt * fee))
@@ -580,22 +583,21 @@ class Dashboard(QScrollArea):
         for sigle, cnt, fee in cur.fetchall():
             total = cnt * fee
             cur.execute(f"""
-                SELECT COALESCE(SUM(
-                    COALESCE(par.paid, 0) * {fee} / NULLIF(par.total_du, 0)
-                ), 0)
-                FROM larcauth_student s
-                JOIN larcauth_classroom c ON c.id = s.s_classroom_id
-                JOIN larcauth_level l ON l.id = c.fk_level_id
-                JOIN larcauth_program p ON p.id = l.fk_program_id
-                JOIN LATERAL (
-                    SELECT COALESCE(SUM(cp.amount), 0) as paid,
-                           COALESCE(SUM(sf.annual_fee), 0) as total_du
-                    FROM larcauth_student_parent sp
-                    JOIN compta_payment cp ON cp.parent_id = sp.parent_id
-                    JOIN compta_student_fee sf ON sf.student_id = sp.student_id
-                    WHERE sp.student_id = s.aecuser_ptr_id
-                ) par ON true
-                WHERE p.sigle = %s AND s.enabled = true {flt}
+                SELECT COALESCE(SUM(part), 0) FROM (
+                    SELECT COALESCE(SUM(cp.amount), 0) * {fee}
+                        / NULLIF(SUM(sf.annual_fee), 0) AS part
+                    FROM larcauth_aecuser par
+                    JOIN larcauth_student_parent sp ON sp.parent_id = par.id
+                    JOIN larcauth_parent lp ON lp.aecuser_ptr_id = par.id AND lp.is_payer = TRUE
+                    JOIN larcauth_student s ON s.aecuser_ptr_id = sp.student_id
+                    JOIN larcauth_classroom c ON c.id = s.s_classroom_id
+                    JOIN larcauth_level l ON l.id = c.fk_level_id
+                    JOIN larcauth_program p ON p.id = l.fk_program_id
+                    LEFT JOIN compta_payment cp ON cp.parent_id = par.id
+                    LEFT JOIN compta_student_fee sf ON sf.student_id = sp.student_id
+                    WHERE p.sigle = %s AND s.enabled = true {flt}
+                    GROUP BY par.id
+                ) sub
             """, (sigle,))
             pad = int(cur.fetchone()[0] or 0)
             pad = min(pad, total)
