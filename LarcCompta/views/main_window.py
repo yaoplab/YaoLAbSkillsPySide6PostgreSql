@@ -123,27 +123,33 @@ class MainWindow(QWidget):
         sb.addStretch()
         self._sidebar = sidebar
 
-        # Wrapper dans un QScrollArea pour que tout reste accessible
-        sidebar_scroll = QScrollArea()
-        sidebar_scroll.setWidgetResizable(True)
-        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        sidebar_scroll.setFrameShape(QScrollArea.NoFrame)
-        sidebar_scroll.setWidget(sidebar)
-        sidebar_scroll.setMinimumWidth(ds.space_xxl * 2)  # 168px min
-        sidebar_scroll.setMaximumWidth(ds.sidebar_width + ds.space_xxxl)  # 233+136 max
+        # ── Slider vertical DANS la sidebar (classes ↕ navigation) ──
+        # On sort le SidebarWidget du layout principal et on le met
+        # dans un QSplitter avec le bloc NavButton.
+        sb.removeWidget(self._class_sidebar)
+        sb.removeWidget(sep2)
+        # Reconstruire : SidebarWidget (haut) | NavButtons (bas)
+        nav_bottom = QWidget()
+        nav_bl = QVBoxLayout(nav_bottom)
+        nav_bl.setContentsMargins(0, 0, 0, 0)
+        nav_bl.setSpacing(ds.space_xs)
+        for _, btn in self._nav_buttons.items():
+            nav_bl.addWidget(btn)
+        # Reprendre le sep2
+        nav_bl.insertWidget(0, sep2)
+
+        self._sidebar_splitter = QSplitter(Qt.Vertical)
+        self._sidebar_splitter.setChildrenCollapsible(False)
+        self._sidebar_splitter.addWidget(self._class_sidebar)
+        self._sidebar_splitter.addWidget(nav_bottom)
+        self._sidebar_splitter.setSizes([ds.sidebar_width * 2, ds.sidebar_width])
+        self._sidebar_splitter.setHandleWidth(ds.space_xxs)
+        sb.addWidget(self._sidebar_splitter)
 
         # ── Content ──
         self._stack = QStackedWidget()
-
-        # QSplitter entre sidebar et contenu
-        self._splitter = QSplitter(Qt.Horizontal)
-        self._splitter.setChildrenCollapsible(False)
-        self._splitter.addWidget(sidebar_scroll)
-        self._splitter.addWidget(self._stack)
-        self._splitter.setSizes([ds.sidebar_width, ds.golden_width(ds.sidebar_width) * 2])
-        self._splitter.setHandleWidth(ds.space_xxs)  # 4px
-
-        layout.addWidget(self._splitter)
+        layout.addWidget(sidebar, 0)
+        layout.addWidget(self._stack, 1)
         self._restyle()
 
     # ------------------------------------------------------------------
