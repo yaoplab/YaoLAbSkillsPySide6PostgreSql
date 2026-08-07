@@ -116,10 +116,14 @@ class ClassPaymentPanel(QWidget):
             self._grid_layout.setRowMinimumHeight(row, DEFAULT_CONFIG.card_h)
 
     def _clear_grid(self):
-        while self._grid_layout.count():
-            item = self._grid_layout.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
+        """Reconstruit le layout a zero pour eviter tout heritage de row stretch."""
+        old = self.layout()
+        if old:
+            QWidget().setLayout(old)
+        self._grid_layout = QGridLayout(self)
+        self._grid_layout.setContentsMargins(
+            ds.font_label_lg, ds.font_label_lg, ds.font_label_lg, ds.font_label_lg)
+        self._grid_layout.setSpacing(DEFAULT_CONFIG.spacing)
 
     def refresh(self):
         if self._class_id:
@@ -134,6 +138,8 @@ class ClassPaymentPanel(QWidget):
             return
         avail_w = self.width()
         cols = max(1, (avail_w + DEFAULT_CONFIG.spacing) // (DEFAULT_CONFIG.card_w + DEFAULT_CONFIG.spacing)) if avail_w > 100 else 3
+
+        # Extraire toutes les StudentCards
         cards = []
         while self._grid_layout.count():
             item = self._grid_layout.takeAt(0)
@@ -143,7 +149,15 @@ class ClassPaymentPanel(QWidget):
                     cards.append(w)
                 else:
                     w.deleteLater()
-        # Replacer et forcer la hauteur des lignes (pas d'espacement excessif)
+
+        # Reconstruire le layout a zero
+        old = self.layout()
+        if old:
+            QWidget().setLayout(old)  # detache l'ancien sans crash Qt
+        self._grid_layout = QGridLayout(self)
+        self._grid_layout.setContentsMargins(
+            ds.font_label_lg, ds.font_label_lg, ds.font_label_lg, ds.font_label_lg)
+        self._grid_layout.setSpacing(DEFAULT_CONFIG.spacing)
         for idx, card in enumerate(cards):
             row = idx // cols
             self._grid_layout.addWidget(card, row, idx % cols, Qt.AlignCenter)
