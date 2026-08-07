@@ -53,7 +53,7 @@ class MainWindow(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # ── Sidebar ──
+        # ── Sidebar dans un QScrollArea ──
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(ds.sidebar_width)
@@ -92,15 +92,16 @@ class MainWindow(QWidget):
 
         # ── SidebarWidget (programmes → classes) ──
         _sections = [
-            ("Collège", [("PEI", "PEI"), ("MYP", "MYP")]),
-            ("Lycée",   [("DP", "DPFr"), ("DPEn", "DPEn")]),
+            ("Primaire", [("PYP", "PYP"), ("PP", "PP")]),
+            ("Collège",  [("PEI", "PEI"), ("MYP", "MYP")]),
+            ("Lycée",    [("DP", "DPFr"), ("DPEn", "DPEn")]),
         ]
         self._class_sidebar = SidebarWidget(_sections, PROGRAM_STYLES)
         self._class_sidebar.group_selected.connect(self._on_group_selected)
         self._class_sidebar.class_selected.connect(lambda cid, label: self._on_class_clicked(cid, label))
         self._class_sidebar.all_selected.connect(self._on_all_clicked)
-        self._class_sidebar.setMaximumHeight(ds.space_xxxl * 3)  # 408px max
-        sb.addWidget(self._class_sidebar, 1)
+        # Pas de max height ni stretch — la sidebar entière défile
+        sb.addWidget(self._class_sidebar)
 
         # Séparateur entre SidebarWidget et NavButtons
         sep2 = QLabel()
@@ -121,7 +122,15 @@ class MainWindow(QWidget):
 
         sb.addStretch()
         self._sidebar = sidebar
-        layout.addWidget(sidebar)
+
+        # Wrapper dans un QScrollArea pour que tout reste accessible
+        sidebar_scroll = QScrollArea()
+        sidebar_scroll.setWidgetResizable(True)
+        sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        sidebar_scroll.setFrameShape(QScrollArea.NoFrame)
+        sidebar_scroll.setWidget(sidebar)
+        sidebar_scroll.setFixedWidth(ds.sidebar_width)
+        layout.addWidget(sidebar_scroll)
 
         # ── Content ──
         self._stack = QStackedWidget()
@@ -141,7 +150,7 @@ class MainWindow(QWidget):
             FROM larcauth_classroom c
             JOIN larcauth_level l ON l.id = c.fk_level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
-            WHERE c.enabled = TRUE AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')
+            WHERE c.enabled = TRUE AND p.sigle IN ('PYP', 'PP', 'PEI', 'MYP', 'DPEn', 'DPFr')
             ORDER BY p.sigle, c.label
         """)
         self._classes = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
@@ -156,7 +165,7 @@ class MainWindow(QWidget):
             self._current_group_mode = group
             self._current_class_id = 0
         else:
-            mode_map = {"Collège": "grp_college", "Lycée": "grp_lycee"}
+            mode_map = {"Primaire": "grp_primaire", "Collège": "grp_college", "Lycée": "grp_lycee"}
             self._current_group_mode = mode_map.get(group, "grp_all")
             self._current_class_id = 0
         self._switch_to("dashboard")
