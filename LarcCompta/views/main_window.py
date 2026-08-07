@@ -1,17 +1,17 @@
-"""MainWindow LarcCompta — conforme aux 6 skills design Larc."""
+"""MainWindow LarcCompta — SidebarWidget classes + NavButton navigation + dashboard paiement."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QVBoxLayout, QLabel,
-    QStackedWidget,
+    QWidget, QHBoxLayout, QVBoxLayout, QLabel, QScrollArea, QStackedWidget,
 )
 
 from larccommon.database import db
 from larccommon.session import session
 from larccommon.design_system import ds
-from larccommon.theme import theme_manager
+from larccommon.theme import theme_manager, PROGRAM_STYLES
+from larccommon.widgets.sidebar import SidebarWidget
 from larccommon.widgets.nav_button import NavButton
 from larccommon.safe_slot import safe_slot
 
@@ -30,10 +30,14 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LarcCompta — Scolarite")
-        self._current_key: str | None = None
+        self._current_key: str = "dashboard"
         self._pages: dict[str, QWidget] = {}
+        self._classes: list[tuple] = []
+        self._current_class_id: int = 0
+        self._current_group_mode: str = "grp_all"
 
         self._setup_ui()
+        self._load_classes()
         ds.theme_changed.connect(self._restyle)
         QTimer.singleShot(100, lambda: self._switch_to("dashboard"))
 
@@ -52,10 +56,10 @@ class MainWindow(QWidget):
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(ds.sidebar_width)
         sb = QVBoxLayout(sidebar)
-        sb.setContentsMargins(ds.space_xs, ds.space_xl, ds.space_xs, ds.space_lg)
+        sb.setContentsMargins(ds.space_xs, ds.space_xs, ds.space_xs, ds.space_xs)
         sb.setSpacing(ds.space_xs)
 
-        # User info
+        # User
         user_lbl = QLabel(session.full_name or "Comptabilite")
         user_lbl.setStyleSheet(
             f"font-size: {s(ds.font_label_lg)}px; font-weight: bold; color: {p.text_strong}; "
@@ -72,17 +76,34 @@ class MainWindow(QWidget):
         sep.setFixedHeight(ds.border_width)
         sep.setStyleSheet(f"background-color: {p.border};")
         sb.addWidget(sep)
-        sb.addSpacing(ds.space_xs)
 
-        # Navigation — NavButton standard (skill sidebar-spec K1-K25)
-        self._buttons: dict[str, NavButton] = {}
+        # ── SidebarWidget (programmes → classes) ──
+        _sections = [
+            ("Collège", [("PEI", "PEI"), ("MYP", "MYP")]),
+            ("Lycée",   [("DP", "DPFr"), ("DPEn", "DPEn")]),
+        ]
+        self._class_sidebar = SidebarWidget(_sections, PROGRAM_STYLES)
+        self._class_sidebar.group_selected.connect(self._on_group_selected)
+        self._class_sidebar.class_selected.connect(lambda cid, label: self._on_class_clicked(cid, label))
+        self._class_sidebar.all_selected.connect(self._on_all_clicked)
+        self._class_sidebar.setMaximumHeight(ds.space_xxxl * 3)  # 408px max
+        sb.addWidget(self._class_sidebar, 1)
+
+        # Séparateur entre SidebarWidget et NavButtons
+        sep2 = QLabel()
+        sep2.setFixedHeight(ds.border_width)
+        sep2.setStyleSheet(f"background-color: {p.border};")
+        sb.addWidget(sep2)
+
+        # ── NavButton navigation ──
+        self._nav_buttons: dict[str, NavButton] = {}
         for key, label, icon_name in NAV_ITEMS:
             btn = NavButton(
                 text=label,
                 icon_name=icon_name,
                 on_click=lambda checked=False, k=key: self._switch_to(k),
             )
-            self._buttons[key] = btn
+            self._nav_buttons[key] = btn
             sb.addWidget(btn)
 
         sb.addStretch()
@@ -95,30 +116,83 @@ class MainWindow(QWidget):
         self._restyle()
 
     # ------------------------------------------------------------------
+    # Load classes
+    # ------------------------------------------------------------------
+    def _load_classes(self):
+        conn = db.server_conn
+        if not conn:
+            return
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.id, c.label, l.fk_program_id, p.sigle
+            FROM larcauth_classroom c
+            JOIN larcauth_level l ON l.id = c.fk_level_id
+            JOIN larcauth_program p ON p.id = l.fk_program_id
+            WHERE c.enabled = TRUE AND p.sigle IN ('PEI', 'MYP', 'DPEn', 'DPFr')
+            ORDER BY p.sigle, c.label
+        """)
+        self._classes = [(r[0], r[1], r[2], r[3]) for r in cur.fetchall()]
+        self._class_sidebar.load_classes(self._classes)
+
+    # ------------------------------------------------------------------
+    # SidebarWidget signals
+    # ------------------------------------------------------------------
+    @safe_slot("MainWindow._on_group_selected")
+    def _on_group_selected(self, group: str):
+        if group.startswith("grp_"):
+            self._current_group_mode = group
+            self._current_class_id = 0
+        else:
+            mode_map = {"Collège": "grp_college", "Lycée": "grp_lycee"}
+            self._current_group_mode = mode_map.get(group, "grp_all")
+            self._current_class_id = 0
+        self._switch_to("dashboard")
+
+    @safe_slot("MainWindow._on_class_clicked")
+    def _on_class_clicked(self, cid: int, label: str):
+        self._current_class_id = cid
+        self._current_group_mode = "class"
+        # Charger le ClassPaymentPanel
+        from LarcCompta.views.class_payment_panel import ClassPaymentPanel
+        panel = ClassPaymentPanel()
+        panel.load(cid, label)
+        self._pages["class_payment"] = panel
+        self._stack.addWidget(panel)
+        self._stack.setCurrentWidget(panel)
+        self._current_key = "class_payment"
+
+    @safe_slot("MainWindow._on_all_clicked")
+    def _on_all_clicked(self):
+        self._current_group_mode = "grp_all"
+        self._current_class_id = 0
+        self._switch_to("dashboard")
+
+    # ------------------------------------------------------------------
     # Navigation
     # ------------------------------------------------------------------
     @safe_slot("MainWindow._switch_to")
     def _switch_to(self, key: str):
-        if key == self._current_key:
-            return
         self._current_key = key
 
-        for k, btn in self._buttons.items():
+        for k, btn in self._nav_buttons.items():
             btn.setChecked(k == key)
 
         if key not in self._pages:
-            mod_map = {
-                "dashboard": ("LarcCompta.views.dashboard", "Dashboard"),
-                "payments":   ("LarcCompta.views.payment_list", "PaymentList"),
-                "parents":    ("LarcCompta.views.parents_list", "ParentsList"),
-                "students":   ("LarcCompta.views.students_list", "StudentsList"),
-                "rappels":    ("LarcCompta.views.reminders", "ReminderPanel"),
-            }
-            if key in mod_map:
-                mod_name, cls_name = mod_map[key]
-                mod = __import__(mod_name, fromlist=[cls_name])
-                cls = getattr(mod, cls_name)
-                self._pages[key] = cls()
+            if key == "dashboard":
+                from LarcCompta.views.dashboard import Dashboard
+                self._pages[key] = Dashboard()
+            elif key == "payments":
+                from LarcCompta.views.payment_list import PaymentList
+                self._pages[key] = PaymentList()
+            elif key == "parents":
+                from LarcCompta.views.parents_list import ParentsList
+                self._pages[key] = ParentsList()
+            elif key == "students":
+                from LarcCompta.views.students_list import StudentsList
+                self._pages[key] = StudentsList()
+            elif key == "rappels":
+                from LarcCompta.views.reminders import ReminderPanel
+                self._pages[key] = ReminderPanel()
             else:
                 return
             self._stack.addWidget(self._pages[key])
@@ -131,7 +205,6 @@ class MainWindow(QWidget):
     @safe_slot("MainWindow._restyle")
     def _restyle(self):
         p = theme_manager.palette
-        s = theme_manager.font_size
         try:
             self._sidebar.setStyleSheet(
                 f"#sidebar {{ background-color: {p.surface_variant}; "
