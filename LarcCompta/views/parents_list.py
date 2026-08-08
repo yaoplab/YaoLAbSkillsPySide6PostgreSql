@@ -91,6 +91,12 @@ class _PaymentForm(QDialog):
         self._f_ref.setStyleSheet(fstyle)
         form.addRow("Référence :", self._f_ref)
 
+        self._f_file = QLineEdit()
+        self._f_file.setPlaceholderText("Chemin du fichier (scan, photo, PDF)")
+        self._f_file.setFixedHeight(ds.field_height)
+        self._f_file.setStyleSheet(fstyle)
+        form.addRow("Preuve (fichier) :", self._f_file)
+
         layout.addLayout(form)
         layout.addStretch()
 
@@ -126,10 +132,11 @@ class _PaymentForm(QDialog):
         conn = db.server_conn
         if not conn: return
         cur = conn.cursor()
-        cur.execute("INSERT INTO compta_payment (parent_id, amount, payment_date, payment_method, reference) "
-                    "VALUES (%s, %s, %s, %s, %s)",
+        file_url = self._f_file.text().strip() or None
+        cur.execute("INSERT INTO compta_payment (parent_id, amount, payment_date, payment_method, reference, file_url) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
                     (self._pid, amount, self._f_date.date().toPython(),
-                     self._f_method.currentText(), self._f_ref.text().strip() or None))
+                     self._f_method.currentText(), self._f_ref.text().strip() or None, file_url))
         self.accept()
 
 
@@ -418,7 +425,7 @@ class ParentsList(QWidget):
 
         # ── Paiements ──
         cur.execute("""
-            SELECT amount, payment_date, payment_method, reference
+            SELECT amount, payment_date, payment_method, reference, file_url
             FROM compta_payment WHERE parent_id = %s ORDER BY payment_date DESC LIMIT 20
         """, (pid,))
         payments = cur.fetchall()
@@ -428,7 +435,7 @@ class ParentsList(QWidget):
             title2.setStyleSheet(f"font-size: {s(12)}px; font-weight: bold; color: {p.primary}; border: none;")
             self._payments_layout.addWidget(title2)
 
-            for amt, date, method, ref in payments:
+            for amt, date, method, ref, file_url in payments:
                 row_w = QWidget()
                 rl = QHBoxLayout(row_w)
                 rl.setContentsMargins(ds.space_sm, ds.space_xxs, ds.space_sm, ds.space_xxs)
@@ -438,9 +445,18 @@ class ParentsList(QWidget):
                 rl.addWidget(QLabel(method))
                 if ref:
                     rl.addWidget(QLabel(ref))
+                if file_url:
+                    link = QLabel(file_url)
+                    link.setStyleSheet(f"font-size: {s(10)}px; color: {p.primary}; "
+                                      f"text-decoration: underline; border: none;")
+                    link.setToolTip(file_url)
+                    rl.addWidget(link)
                 rl.addStretch()
                 for lbl in row_w.findChildren(QLabel):
                     lbl.setStyleSheet(f"font-size: {s(12)}px; color: {p.text_strong}; border: none;")
+                    if file_url and lbl.text() == file_url:
+                        lbl.setStyleSheet(f"font-size: {s(10)}px; color: {p.primary}; "
+                                         f"text-decoration: underline; border: none;")
                 row_w.setStyleSheet(f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}")
                 self._payments_layout.addWidget(row_w)
         else:
@@ -464,28 +480,27 @@ class ParentsList(QWidget):
         if not conn: return
         cur = conn.cursor()
 
+        # Lire la balance (1 seule requete)
         cur.execute("""
-            SELECT COALESCE(SUM(sf.annual_fee), 0)
-            FROM larcauth_student_parent sp
-            JOIN compta_student_fee sf ON sf.student_id = sp.student_id
-            WHERE sp.parent_id = %s
+            SELECT total_due, total_paid, remaining, status, status_override,
+                   COALESCE(change_history, '[]'::jsonb)
+            FROM compta_parent_balance
+            WHERE parent_id = %s AND academic_year = '2026-2027'
         """, (self._selected_pid,))
-        total_du = cur.fetchone()[0] or 0
+        bal = cur.fetchone()
+        if not bal:
+            return
+        total_du, total_paid, remaining, status, is_overridden, history = bal
+        self._selected_paid = total_paid
+        self._selected_du = total_du
 
-        cur.execute("SELECT COALESCE(SUM(amount), 0) FROM compta_payment WHERE parent_id = %s", (self._selected_pid,))
-        total_paid = cur.fetchone()[0] or 0
-
-        remaining = total_du - total_paid
+        # Echeancier pour info
         month = QDate.currentDate().month()
         cur.execute("SELECT percentage_expected FROM compta_payment_schedule "
                     "WHERE academic_year = '2026-2027' AND month_number = %s", (month,))
         sched = cur.fetchone()
         expected_pct = float(sched[0]) if sched else 0.0
         expected_amount = int(total_du * expected_pct / 100.0)
-        status = _compute_status(total_paid, total_du, expected_pct)
-
-        self._selected_paid = total_paid
-        self._selected_du = total_du
 
         summary_w = QWidget()
         sl = QFormLayout(summary_w)
@@ -503,24 +518,25 @@ class ParentsList(QWidget):
         _row("Reste à payer", _fmt(remaining), p.error if remaining > 0 else p.success)
         _row(f"Attendu ({expected_pct:.0f}%)", _fmt(expected_amount), p.primary)
 
-        # Barre progression
-        pct = (total_paid / total_du * 100) if total_du > 0 else 0
+        # Barre
+        pct_val = (total_paid / total_du * 100) if total_du > 0 else 0
         bar_bg = QFrame()
         bar_bg.setFixedHeight(ds.space_md)
         bar_bg.setStyleSheet(f"background: {p.outline_variant}; border-radius: {ds.radius_xs // 2}px;")
         bar_fill = QFrame(bar_bg)
-        bar_fill.setFixedSize(max(ds.space_xxs, int(300 * pct / 100)), ds.space_md)
+        bar_fill.setFixedSize(max(ds.space_xxs, int(300 * pct_val / 100)), ds.space_md)
         bar_fill.setStyleSheet(f"background: {getattr(p, STATUS_COLORS.get(status, 'primary'))}; "
                                f"border-radius: {ds.radius_xs // 2}px;")
         sl.addRow("Progression", bar_bg)
 
         # Statut
         status_color = getattr(p, STATUS_COLORS.get(status, "primary"))
-        status_lbl = QLabel(STATUS_LABELS.get(status, status))
+        override_mark = " ✎" if is_overridden else ""
+        status_lbl = QLabel(STATUS_LABELS.get(status, status) + override_mark)
         status_lbl.setStyleSheet(f"font-size: {s(22)}px; font-weight: bold; color: {status_color}; border: none;")
         sl.addRow("Statut", status_lbl)
 
-        # Combo pour modifier le statut (comptable)
+        # Combo override
         combo = QComboBox()
         combo.addItems(["en_retard", "en_cours", "solde", "exonere"])
         combo.setCurrentText(status)
@@ -532,13 +548,34 @@ class ParentsList(QWidget):
             lambda t, pid=self._selected_pid: self._set_status_override(pid, t))
         sl.addRow("Modifier statut", combo)
 
+        # Historique
+        if history:
+            hist_title = QLabel("Historique des changements")
+            hist_title.setStyleSheet(f"font-size: {s(11)}px; font-weight: bold; color: {p.text_soft}; border: none;")
+            sl.addRow(hist_title)
+            for entry in history:
+                e = QLabel(f"{entry.get('at','?')[:16]} — {entry.get('what','?')} : {entry.get('new_status','?')}")
+                e.setStyleSheet(f"font-size: {s(10)}px; color: {p.text_soft}; border: none;")
+                sl.addRow(e)
+
         self._summary_layout.addWidget(summary_w)
 
     def _set_status_override(self, pid: int, new_status: str):
         conn = db.server_conn
         if not conn: return
         cur = conn.cursor()
-        # Mettre à jour tous les élèves liés à ce parent
+        import json as _j
+        # Mettre a jour la balance parent
+        cur.execute("""
+            UPDATE compta_parent_balance SET
+                status = %s,
+                status_override = TRUE,
+                change_history = change_history || %s::jsonb,
+                updated_at = NOW()
+            WHERE parent_id = %s AND academic_year = '2026-2027'
+        """, (new_status, _j.dumps([{"at": str(QDate.currentDate().toPython()),
+                                      "what": "status_override", "new_status": new_status}]), pid))
+        # Propager aux enfants
         cur.execute("""
             UPDATE larcauth_student SET statut_scolarite = %s
             WHERE aecuser_ptr_id IN (
@@ -566,24 +603,23 @@ class ParentsList(QWidget):
             self.refresh()
 
     def _sync_parent_to_children(self, parent_id: int):
-        """Recalcule le statut du parent et le propage a tous ses enfants."""
+        """Recalcule le statut et met a jour compta_parent_balance + larcauth_student."""
         conn = db.server_conn
         if not conn: return
         cur = conn.cursor()
 
         # Total du pour ce parent
-        cur.execute("""
-            SELECT COALESCE(SUM(sf.annual_fee), 0)
+        cur.execute("""SELECT COALESCE(SUM(sf.annual_fee), 0)
             FROM larcauth_student_parent sp
             JOIN compta_student_fee sf ON sf.student_id = sp.student_id
-            WHERE sp.parent_id = %s
-        """, (parent_id,))
+            WHERE sp.parent_id = %s""", (parent_id,))
         total_du = cur.fetchone()[0] or 0
 
         # Total paye
         cur.execute("SELECT COALESCE(SUM(amount), 0) FROM compta_payment WHERE parent_id = %s",
                     (parent_id,))
         total_paid = cur.fetchone()[0] or 0
+        remaining = total_du - total_paid
 
         # Echeancier
         month = QDate.currentDate().month()
@@ -594,7 +630,24 @@ class ParentsList(QWidget):
 
         status = _compute_status(total_paid, total_du, expected_pct)
 
-        # Propager a tous les enfants
+        # 1. Mettre a jour la balance parent (source de verite)
+        import json as _j
+        cur.execute("""
+            INSERT INTO compta_parent_balance (parent_id, academic_year, total_due, total_paid, remaining, status, change_history)
+            VALUES (%s, '2026-2027', %s, %s, %s, %s, %s)
+            ON CONFLICT (parent_id, academic_year) DO UPDATE SET
+                total_due = EXCLUDED.total_due,
+                total_paid = EXCLUDED.total_paid,
+                remaining = EXCLUDED.remaining,
+                status = EXCLUDED.status,
+                change_history = compta_parent_balance.change_history || EXCLUDED.change_history::jsonb,
+                updated_at = NOW()
+        """, (parent_id, total_du, total_paid, remaining, status,
+              _j.dumps([{"at": str(QDate.currentDate().toPython()),
+                          "what": "paiement_sync", "new_status": status,
+                          "paid": total_paid, "du": total_du}])))
+
+        # 2. Propager aux enfants
         cur.execute("""
             UPDATE larcauth_student SET statut_scolarite = %s
             WHERE aecuser_ptr_id IN (
