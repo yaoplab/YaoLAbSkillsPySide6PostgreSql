@@ -20,7 +20,6 @@ from larccommon.safe_slot import safe_slot
 
 NAV_ITEMS = [
     ("dashboard", "Tableau de bord", "home"),
-    ("payments",   "Paiements",      "check"),
     ("parents",    "Parents",         "person"),
     ("students",   "Eleves",          "school"),
     ("rappels",    "Rappels",         "schedule"),
@@ -218,9 +217,6 @@ class MainWindow(QWidget):
             if key == "dashboard":
                 from LarcCompta.views.dashboard import Dashboard
                 self._pages[key] = Dashboard(group_mode=self._current_group_mode)
-            elif key == "payments":
-                from LarcCompta.views.payment_list import PaymentList
-                self._pages[key] = PaymentList()
             elif key == "parents":
                 from LarcCompta.views.parents_list import ParentsList
                 self._pages[key] = ParentsList()

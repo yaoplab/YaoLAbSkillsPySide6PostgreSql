@@ -41,53 +41,28 @@ class ClassPaymentPanel(QWidget):
             return
         cur = conn.cursor()
 
-        # Pour chaque élève, calculer le statut hérité du/des parents payeurs
+        # Le statut est herite du parent et stocke dans larcauth_student.statut_scolarite
+        # Il est mis a jour automatiquement a chaque paiement (sync_parent_to_children)
         cur.execute("""
-            WITH parent_status AS (
-                SELECT sp.student_id, par.id as parent_id,
-                       COALESCE(SUM(sf.annual_fee), 0) as total_du,
-                       COALESCE((
-                           SELECT SUM(cp.amount) FROM compta_payment cp
-                           WHERE cp.parent_id = par.id
-                       ), 0) as total_paid
-                FROM larcauth_student_parent sp
-                JOIN larcauth_parent lp ON lp.aecuser_ptr_id = sp.parent_id AND lp.is_payer = TRUE
-                JOIN larcauth_aecuser par ON par.id = sp.parent_id
-                LEFT JOIN compta_student_fee sf ON sf.student_id = sp.student_id
-                GROUP BY sp.student_id, par.id
-            )
             SELECT s.aecuser_ptr_id, aec.last_name, aec.first_name,
-                   COALESCE(MAX(ps.total_du), 0) as max_du,
-                   COALESCE(MAX(ps.total_paid), 0) as max_paid,
-                   COALESCE(STRING_AGG(DISTINCT par.first_name || ' ' || par.last_name, ', '), '—') as parents
+                   COALESCE(s.statut_scolarite, 'en_retard') as status
             FROM larcauth_student s
             JOIN larcauth_aecuser aec ON aec.id = s.aecuser_ptr_id
-            LEFT JOIN larcauth_student_parent sp ON sp.student_id = s.aecuser_ptr_id
-            LEFT JOIN larcauth_parent lp ON lp.aecuser_ptr_id = sp.parent_id AND lp.is_payer = TRUE
-            LEFT JOIN larcauth_aecuser par ON par.id = sp.parent_id
-            LEFT JOIN parent_status ps ON ps.student_id = s.aecuser_ptr_id
             WHERE s.s_classroom_id = %s AND s.enabled = TRUE
-            GROUP BY s.aecuser_ptr_id, aec.last_name, aec.first_name
             ORDER BY aec.last_name, aec.first_name
         """, (self._class_id,))
 
+        # Mapping : statut_scolarite -> set_payment_status
+        _MAP = {"solde": "solde", "exonere": "solde",
+                "en_cours": "normal", "en_retard": "retard"}
+
         students = []
         for row in cur.fetchall():
-            sid, ln, fn, max_du, max_paid, parents_str = row
-
-            # Déterminer le statut à partir du meilleur parent
-            if max_du <= 0:
-                status = "retard"       # pas de frais configurés
-            elif max_paid >= max_du:
-                status = "solde"         # tout payé
-            elif max_paid > 0:
-                status = "normal"        # en cours (payé mais pas tout)
-            else:
-                status = "retard"        # rien payé
-
+            sid, ln, fn, db_status = row
+            status = _MAP.get(db_status, "retard")
             students.append({
                 "id": sid, "last_name": ln, "first_name": fn,
-                "du": max_du, "paid": max_paid, "status": status,
+                "status": status,
             })
 
         if not students:
