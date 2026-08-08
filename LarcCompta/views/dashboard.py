@@ -395,7 +395,8 @@ class Dashboard(QScrollArea):
             JOIN larcauth_program p ON p.id = l.fk_program_id
             WHERE s.enabled = true {flt}
         """)
-        n_co, n_ly = cur.fetchone()
+        row = cur.fetchone() or (0, 0)
+        n_co, n_ly = row[0], row[1]
         total_du = n_co * COLLEGE_FEE + n_ly * LYCEE_FEE
         total_students = n_co + n_ly
 
@@ -422,7 +423,7 @@ class Dashboard(QScrollArea):
                 GROUP BY par.id
             ) sub
         """)
-        paid = int(cur.fetchone()[0] or 0)
+        paid = int((cur.fetchone() or [0])[0] or 0)
         rem = max(0, total_du - paid)
         taux = (paid / total_du * 100) if total_du > 0 else 0
 
@@ -438,7 +439,7 @@ class Dashboard(QScrollArea):
             JOIN larcauth_program p ON p.id = l.fk_program_id
             WHERE s.enabled = true {flt}
         """)
-        n_payers = cur.fetchone()[0] or 0
+        n_payers = (cur.fetchone() or [0])[0] or 0
 
         kpis = [
             ("Total du", _fmt(total_du), "primary"),
@@ -471,7 +472,7 @@ class Dashboard(QScrollArea):
             JOIN larcauth_program p ON p.id = l.fk_program_id
             WHERE s.enabled = true {flt}
         """)
-        total_du = cur.fetchone()[0] or 0
+        total_du = (cur.fetchone() or [0])[0] or 0
 
         # Paiements agreges par parent
         cur.execute(f"""
@@ -492,7 +493,7 @@ class Dashboard(QScrollArea):
                 GROUP BY par.id
             ) sub
         """)
-        paid = int(cur.fetchone()[0] or 0)
+        paid = int((cur.fetchone() or [0])[0] or 0)
         rem = max(0, total_du - paid)
 
         donut = _DonutChart("Repartition des frais", [
@@ -533,10 +534,10 @@ class Dashboard(QScrollArea):
                     GROUP BY par.id
                 ) sub
             """)
-            pad = int(cur.fetchone()[0] or 0)
+            pad = int((cur.fetchone() or [0])[0] or 0)
             pad = min(pad, cnt * fee)
             bar_data.append((f"{cat} ({_fmt(fee)})", pad, cnt * fee))
-            pad = int(cur.fetchone()[0] or 0)
+            pad = int((cur.fetchone() or [0])[0] or 0)
             pad = min(pad, cnt * fee)
             bar_data.append((f"{cat} ({_fmt(fee)})", pad, cnt * fee))
 
@@ -599,7 +600,7 @@ class Dashboard(QScrollArea):
                     GROUP BY par.id
                 ) sub
             """, (sigle,))
-            pad = int(cur.fetchone()[0] or 0)
+            pad = int((cur.fetchone() or [0])[0] or 0)
             pad = min(pad, total)
             pct = (pad / total * 100) if total > 0 else 0
 
