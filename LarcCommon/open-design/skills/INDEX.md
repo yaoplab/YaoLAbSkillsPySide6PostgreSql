@@ -104,6 +104,7 @@ de nouvelles regles, ils documentent la structure spatiale canonique de chaque t
 | `infra-reviewer` | graphify, database-operations, sync | [agents/infra-reviewer.md](../agents/infra-reviewer.md) |
 | `graphify-reviewer` | graphify | [agents/graphify-reviewer.md](../agents/graphify-reviewer.md) |
 | `feature-reviewer` | scolarite-finance, event-generator, card-dashboard, student-record, toolkit-reference, dashboard-pattern, search-detail-pattern, form-pattern, card-grid-pattern | [agents/feature-reviewer.md](../agents/feature-reviewer.md) |
+| `scolarite-reviewer` | scolarite-finance, design-tokens, color-rules, zero-hardcoding, theme-reactivity, ergonomics, dashboard-pattern, card-grid-pattern | [agents/scolarite-reviewer.md](../agents/scolarite-reviewer.md) |
 
 ## Regle absolue
 

@@ -45,6 +45,7 @@
 | [graphify-reviewer](agents/graphify-reviewer.md) | Voir le fichier agent |
 | [infra-reviewer](agents/infra-reviewer.md) | Voir le fichier agent |
 | [pyside6-reviewer](agents/pyside6-reviewer.md) | Voir le fichier agent |
+| [scolarite-reviewer](agents/scolarite-reviewer.md) | Voir le fichier agent |
 | [testing-reviewer](agents/testing-reviewer.md) | Voir le fichier agent |
 
 ## Structure
