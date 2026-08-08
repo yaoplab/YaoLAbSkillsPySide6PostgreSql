@@ -26,7 +26,7 @@
 | [graphify](skills/graphify/SKILL.md) | P0 | infra | — |
 | [larc-testing](skills/larc-testing/SKILL.md) | P1 | quality | lint_test_coverage.py |
 | [pyside6-wrapper](skills/pyside6-wrapper/SKILL.md) | P0 | infrastructure | lint_safe_slot.py, lint_file_size.py |
-| [scolarite-finance](skills/scolarite-finance/SKILL.md) | P0 | metier | lint_qss_hardcoding.py, lint_d1_color_checker.py |
+| [scolarite-finance](skills/scolarite-finance/SKILL.md) | P0 | feature | lint_qss_hardcoding.py, lint_d1_color_checker.py |
 | [search-detail-pattern](skills/search-detail-pattern/SKILL.md) | P0 | page-pattern | lint_d1_color_checker.py, lint_qss_hardcoding.py |
 | [sidebar-spec](skills/sidebar-spec/SKILL.md) | P1 | design | lint_d1_color_checker.py, lint_qss_hardcoding.py |
 | [student-record](skills/student-record/SKILL.md) | P0 | feature | lint_d1_color_checker.py, lint_qss_hardcoding.py |
