@@ -190,7 +190,7 @@ class ParentsList(QWidget):
             btn.setFixedHeight(ds.space_lg)
             btn.setStyleSheet(f"QPushButton {{ background: {p.surface}; color: {p.text_strong}; "
                 f"border: 1px solid {p.outline}; border-radius: {ds.radius_xs}px; "
-                f"padding: 2px 8px; font-size: {s(11)}px; }}"
+                f"padding: {ds.space_xxs}px {ds.space_xs}px; font-size: {s(ds.font_label_sm)}px; }}"
                 f"QPushButton:checked {{ background: {p.primary}; color: white; border-color: {p.primary}; }}")
             btn.clicked.connect(lambda checked, k=key: self._on_filter(k))
             flt_row.addWidget(btn)
@@ -209,7 +209,7 @@ class ParentsList(QWidget):
             f"color: {p.text_strong}; gridline-color: {p.outline_variant}; "
             f"border: 1px solid {p.outline_variant}; border-radius: {ds.radius_xs}px;")
         self._table.horizontalHeader().setStyleSheet(f"QHeaderView::section {{ background: {p.surface_variant}; "
-            f"color: {p.text_strong}; font-weight: bold; padding: 4px; border: none; }}")
+            f"color: {p.text_strong}; font-weight: bold; padding: {ds.space_xxs}px; border: none; }}")
         self._table.itemSelectionChanged.connect(self._on_select_parent)
         ll.addWidget(self._table, 1)
 
@@ -411,6 +411,7 @@ class ParentsList(QWidget):
 
             for fn2, ln2, cls, fee, sigle in children:
                 row_w = QWidget()
+                row_w.setAttribute(Qt.WA_StyledBackground, True)
                 rl = QHBoxLayout(row_w)
                 rl.setContentsMargins(ds.space_sm, ds.space_xxs, ds.space_sm, ds.space_xxs)
                 rl.setSpacing(ds.space_md)
@@ -521,9 +522,11 @@ class ParentsList(QWidget):
         # Barre
         pct_val = (total_paid / total_du * 100) if total_du > 0 else 0
         bar_bg = QFrame()
+        bar_bg.setAttribute(Qt.WA_StyledBackground, True)
         bar_bg.setFixedHeight(ds.space_md)
         bar_bg.setStyleSheet(f"background: {p.outline_variant}; border-radius: {ds.radius_xs // 2}px;")
         bar_fill = QFrame(bar_bg)
+        bar_fill.setAttribute(Qt.WA_StyledBackground, True)
         bar_fill.setFixedSize(max(ds.space_xxs, int(300 * pct_val / 100)), ds.space_md)
         bar_fill.setStyleSheet(f"background: {getattr(p, STATUS_COLORS.get(status, 'primary'))}; "
                                f"border-radius: {ds.radius_xs // 2}px;")
@@ -540,7 +543,7 @@ class ParentsList(QWidget):
         combo = QComboBox()
         combo.addItems(["en_retard", "en_cours", "solde", "exonere"])
         combo.setCurrentText(status)
-        combo.setFixedWidth(200)
+        combo.setFixedWidth(ds.space_xxxl + ds.space_md)  # 136+20=156
         combo.setStyleSheet(f"background: {p.background}; border: 1px solid {p.outline}; "
             f"border-radius: {ds.radius_xs}px; padding: {ds.space_xs}px; "
             f"color: {p.text_strong}; font-size: {s(12)}px;")

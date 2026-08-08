@@ -23,9 +23,10 @@ def _fmt(amount: int) -> str:
 
 class _ReminderForm(QDialog):
 
-    def __init__(self, sid: int, name: str, due_amount: int, parent=None):
+    def __init__(self, sid: int, name: str, due_amount: int, parent_id: int = 0, parent=None):
         super().__init__(parent)
         self._sid = sid
+        self._parent_id = parent_id
         self._name = name
         self._due = due_amount
         self.setWindowTitle(f"Rappel — {name}")
@@ -40,7 +41,8 @@ class _ReminderForm(QDialog):
         layout.setContentsMargins(ds.space_md, ds.space_md, ds.space_md, ds.space_md)
         layout.setSpacing(ds.space_sm)
 
-        info = QLabel(f"Eleve : {self._name}\nMontant du : {_fmt(self._due)} FCFA")
+        label = "Parent" if self._parent_id else "Eleve"
+        info = QLabel(f"{label} : {self._name}\nMontant du : {_fmt(self._due)} FCFA")
         info.setStyleSheet(
             f"font-size: {s(ds.font_body_md)}px; color: {p.text_strong}; font-weight: bold; border: none;")
         layout.addWidget(info)
@@ -101,17 +103,22 @@ class _ReminderForm(QDialog):
         conn = db.server_conn
         if not conn: return
         cur = conn.cursor()
-        # Trouver le parent payeur lie a cet eleve
-        cur.execute("SELECT p.id FROM larcauth_aecuser p "
-                    "JOIN larcauth_student_parent sp ON sp.parent_id = p.id "
-                    "JOIN larcauth_parent lp ON lp.aecuser_ptr_id = p.id AND lp.is_payer = TRUE "
-                    "WHERE sp.student_id = %s LIMIT 1", (self._sid,))
-        pr = cur.fetchone()
-        if not pr:
-            return  # pas de parent payeur = pas de rappel
+        # Si parent_id fourni directement, l'utiliser
+        if self._parent_id:
+            pid = self._parent_id
+        else:
+            # Trouver le parent payeur lie a cet eleve
+            cur.execute("SELECT p.id FROM larcauth_aecuser p "
+                        "JOIN larcauth_student_parent sp ON sp.parent_id = p.id "
+                        "JOIN larcauth_parent lp ON lp.aecuser_ptr_id = p.id AND lp.is_payer = TRUE "
+                        "WHERE sp.student_id = %s LIMIT 1", (self._sid,))
+            pr = cur.fetchone()
+            if not pr:
+                return
+            pid = pr[0]
         cur.execute("""INSERT INTO compta_reminder (parent_id, reminder_type, message)
             VALUES (%s, %s, %s)""",
-            (pr[0], self._f_type.currentText(), self._f_msg.toPlainText().strip()))
+            (pid, self._f_type.currentText(), self._f_msg.toPlainText().strip()))
         self.accept()
 
 

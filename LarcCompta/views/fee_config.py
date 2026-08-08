@@ -349,6 +349,7 @@ class FeeConfig(QScrollArea):
         self._milestone_card = card
         self._layout.insertWidget(self._layout.count() - 1, card)
 
+    @safe_slot("FeeConfig._add_milestone")
     def _add_milestone(self):
         conn = db.server_conn
         if not conn: return
