@@ -21,7 +21,6 @@ from larccommon.safe_slot import safe_slot
 NAV_ITEMS = [
     ("dashboard", "Tableau de bord", "home"),
     ("parents",    "Parents",         "person"),
-    ("students",   "Eleves",          "school"),
     ("rappels",    "Rappels",         "schedule"),
     ("config",     "Configuration",   "settings"),
 ]
@@ -220,9 +219,6 @@ class MainWindow(QWidget):
             elif key == "parents":
                 from LarcCompta.views.parents_list import ParentsList
                 self._pages[key] = ParentsList()
-            elif key == "students":
-                from LarcCompta.views.students_list import StudentsList
-                self._pages[key] = StudentsList()
             elif key == "rappels":
                 from LarcCompta.views.reminders import ReminderPanel
                 self._pages[key] = ReminderPanel()
