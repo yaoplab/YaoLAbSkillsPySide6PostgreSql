@@ -28,6 +28,7 @@ Base de connaissances agent pour le projet Larc. **Lis ce fichier en premier.**
 | 20 | [`form-pattern`](form-pattern/SKILL.md) | P0 | 🆕 Pattern canonique de formulaire par sections |
 | 21 | [`card-grid-pattern`](card-grid-pattern/SKILL.md) | P0 | 🆕 Pattern canonique de grille de vignettes responsive |
 | 22 | [`graphify`](graphify/SKILL.md) | P0 | Graphe de connaissances du codebase — "cerveau Obsidian" interrogeable |
+| 23 | [`scolarite-finance`](scolarite-finance/SKILL.md) | P0 | 🆕 Règles métier scolarité : balance, statut, projection, alertes |
 
 ## Arbre de dependances
 
@@ -56,6 +57,9 @@ Page patterns (utilisent les 6 skills design) :
     search-detail-pattern
     form-pattern
     card-grid-pattern
+
+Metier (utilise les skills design + page patterns) :
+    scolarite-finance
 ```
 
 Les skills de gauche (design-tokens, pyside6-wrapper) sont les fondations.
@@ -67,6 +71,7 @@ de nouvelles regles, ils documentent la structure spatiale canonique de chaque t
 
 | Skill | Linter(s) | Script |
 |---|---|---|
+| `scolarite-finance` | D-linter + R-linter (herite de design-tokens+color-rules) | `lint_d1_color_checker.py` + `lint_qss_hardcoding.py` |
 | `graphify` | — (verification manuelle : `graphify .`) | — |
 | `design-tokens` | R-linter (R1-R11, R14, R17) | `scripts/lint_qss_hardcoding.py` |
 | `color-rules` | D-linter (D1, D3-D7, J7) | `scripts/lint_d1_color_checker.py` |
@@ -98,7 +103,7 @@ de nouvelles regles, ils documentent la structure spatiale canonique de chaque t
 | `auth-reviewer` | auth-oauth2, auth-intranet, auth-pin | [agents/auth-reviewer.md](../agents/auth-reviewer.md) |
 | `infra-reviewer` | graphify, database-operations, sync | [agents/infra-reviewer.md](../agents/infra-reviewer.md) |
 | `graphify-reviewer` | graphify | [agents/graphify-reviewer.md](../agents/graphify-reviewer.md) |
-| `feature-reviewer` | event-generator, card-dashboard, student-record, toolkit-reference, dashboard-pattern, search-detail-pattern, form-pattern, card-grid-pattern | [agents/feature-reviewer.md](../agents/feature-reviewer.md) |
+| `feature-reviewer` | scolarite-finance, event-generator, card-dashboard, student-record, toolkit-reference, dashboard-pattern, search-detail-pattern, form-pattern, card-grid-pattern | [agents/feature-reviewer.md](../agents/feature-reviewer.md) |
 
 ## Regle absolue
 
