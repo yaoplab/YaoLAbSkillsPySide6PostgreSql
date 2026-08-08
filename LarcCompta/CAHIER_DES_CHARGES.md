@@ -199,3 +199,85 @@ Un parent peut négocier un plan de paiement différent → `compta_parent_miles
 2. **Barre de santé + projection** — différencie visuellement
 3. **Rappels groupés** — automatise les relances
 4. **Suivi des rappels** — mesure l'efficacité
+
+---
+
+## 10. Points faibles et solutions
+
+### 10a. Export — Génération de rapports
+
+**Solution : un bouton « Exporter » dans la Vue d'ensemble.**
+
+3 formats accessibles depuis le dashboard :
+
+| Rapport | Contenu | Déclencheur |
+|---|---|---|
+| État des impayés | Liste parents avec solde > 0, triée par montant. En-tête établissement, date. | Bouton "Exporter" → "Impayés" |
+| Bilan annuel | Récapitulatif par programme : dû, encaissé, restant, taux. Tableau + barres. | Bouton "Exporter" → "Bilan" |
+| Relevé individuel | Dossier complet du parent : enfants, frais, paiements, solde, statut, historique. | Bouton "Exporter" dans le dossier parent |
+
+Utilise `docx` npm. Même pipeline que le manuel technique (LarcDocs/gen_manual.js).
+
+### 10b. Projection — Deux courbes pour les deux réalités
+
+Le dashboard affiche **deux courbes** superposées :
+
+**Courbe standard** (pointillés gris) — comparaison `total_paid` vs `total_due × %_attendu`. Tous les parents. C'est le référentiel théorique.
+
+**Courbe ajustée** (plein, couleur) — exclut les parents avec milestones personnalisés de l'attendu. Leur « attendu » devient la somme de leurs milestones. Leur `paid` est retiré du total payé.
+
+```
+100% │· · · · · · · · ● attendu standard
+ 80% │────────────●─── ─ attendu ajusté  
+ 60% │         ●──/    ─ réel
+ 40% │    ●──/          
+ 20% │ ●─/             
+  0% └─────────────────
+     S  O  N  D  J  F  M  A  M  J
+```
+
+Un petit tableau sous les courbes liste les parents en échéancier personnalisé et leur statut.
+
+### 10c. Alerte proactive — Badge rouge sur la sidebar
+
+**Solution : un badge rouge sur le bouton « Rappels ».**
+
+```python
+# Dans la Configuration, ajouter :
+alert_threshold  INTEGER DEFAULT 10   -- nb minimum de parents en retard
+alert_min_amount INTEGER DEFAULT 500000  -- montant minimum restant (FCFA)
+
+# Le dashboard recalcule à chaque rafraîchissement :
+cur.execute("""
+    SELECT COUNT(*) FROM compta_parent_balance
+    WHERE status = 'en_retard' AND remaining > %s
+      AND academic_year = '2026-2027'
+""", (alert_min_amount,))
+
+# Si count >= alert_threshold → badge rouge sur le bouton sidebar
+self._nav_buttons['rappels'].setText(f"📅 Rappels ⚠ {count}")
+```
+
+Le gestionnaire voit l'alerte dès l'ouverture de LarcScolarité, sans avoir besoin d'ouvrir le dashboard.
+
+---
+
+## 11. SQL — ajouts aux tables existantes
+
+```sql
+ALTER TABLE compta_parent_balance 
+  ADD COLUMN IF NOT EXISTS has_custom_schedule BOOLEAN DEFAULT FALSE;
+-- TRUE si le parent a des compta_parent_milestone (échéancier personnalisé)
+```
+
+---
+
+## 12. Priorité (mise à jour)
+
+| # | Tâche | Impact |
+|---|---|---|
+| 1 | Courbe ajustée (10b) | Le gestionnaire voit la VRAIE situation |
+| 2 | Alerte proactive (10c) | N'oublie jamais de vérifier |
+| 3 | Page Impayés | Agir sur les retards |
+| 4 | Export (10a) | Rapports pour la direction |
+| 5 | Rappels groupés | Automatisation des relances |
