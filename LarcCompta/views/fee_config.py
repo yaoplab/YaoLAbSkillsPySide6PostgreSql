@@ -1,27 +1,34 @@
-"""FeeConfig — configuration des barèmes et échéanciers."""
+"""FeeConfig — barèmes par programme + échéancier + milestones (skills Larc)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QLineEdit, QComboBox, QFrame, QMessageBox, QGridLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QPushButton, QScrollArea, QFrame,
+    QLineEdit, QFormLayout, QDateEdit, QMessageBox,
 )
-from PySide6.QtCore import QDate
 
 from larccommon.database import db
 from larccommon.design_system import ds
 from larccommon.theme import theme_manager
 from larccommon.safe_slot import safe_slot
+from larccommon.icons import icon as md3_icon
 
 
 def _fmt(amount: int) -> str:
-    if amount >= 1000000:
-        return f"{amount / 1000000:.1f} M"
+    if amount >= 1000000: return f"{amount / 1000000:.1f} M"
     return f"{amount // 1000:,} K".replace(",", " ")
+
+# Regroupement niveaux → programmes
+PROG_ORDER = ["PYP", "PP", "PEI", "MYP", "DPFr", "DPEn"]
+PROG_COLORS = {"PYP": "primary", "PP": "secondary", "PEI": "primary",
+               "MYP": "secondary", "DPFr": "error", "DPEn": "tertiary"}
+MONTHS = ["Septembre", "Octobre", "Novembre", "Décembre",
+          "Janvier", "Février", "Mars", "Avril", "Mai", "Juin"]
 
 
 class FeeConfig(QScrollArea):
-    """Configuration : barèmes, échéances, et gestion des parents."""
+    """Configuration : barèmes groupés par programme + échéancier + milestones."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,13 +36,13 @@ class FeeConfig(QScrollArea):
         self.setFrameShape(QScrollArea.NoFrame)
         self.setObjectName("fee_config")
         ds.theme_changed.connect(self._restyle)
-        self._restyle()
 
         self._container = QWidget()
         self._layout = QVBoxLayout(self._container)
         self._layout.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
         self._layout.setSpacing(ds.space_md)
         self.setWidget(self._container)
+        self._restyle()
         self._setup_ui()
         self.refresh()
 
@@ -45,119 +52,128 @@ class FeeConfig(QScrollArea):
             f"#fee_config {{ background: {theme_manager.palette.background}; border: none; }}")
 
     def _setup_ui(self):
-        p = theme_manager.palette
         s = theme_manager.font_size
-        self._layout.addWidget(self._section_title("Bareme des frais par niveau"))
+        # ── Titre ──
+        title = QLabel("Configuration — Barèmes & Échéanciers")
+        title.setStyleSheet(f"font-size: {s(18)}px; font-weight: bold; "
+                            f"color: {theme_manager.palette.text_strong}; border: none;")
+        self._layout.addWidget(title)
 
-        sub = QLabel("Double-cliquez un montant pour le modifier. Changement immediat en base.")
-        sub.setStyleSheet(f"font-size: {s(11)}px; color: {p.text_soft}; border: none;")
-        self._layout.addWidget(sub)
+        # ── Placeholder grille programmes ──
+        self._prog_grid = QGridLayout()
+        self._prog_grid.setSpacing(ds.space_md)
+        self._layout.addLayout(self._prog_grid)
 
-        self._fee_table = QVBoxLayout()
-        self._fee_table.setSpacing(ds.space_xxs)
-        self._layout.addLayout(self._fee_table)
+        # ── Échéancier ──
+        self._sched_card = None
+        self._sched_layout = None
 
-        # ── Echeancier global ──
-        self._layout.addWidget(self._section_title("Echeancier global (%)"))
-
-        self._sched_table = QVBoxLayout()
-        self._sched_table.setSpacing(ds.space_xxs)
-        self._layout.addLayout(self._sched_table)
-
-        # ── Echeances parents ──
-        hdr2 = QHBoxLayout()
-        hdr2.addWidget(self._section_title("Echeances personnalisees parents"))
-        hdr2.addStretch()
-        add_btn = QPushButton("+ Ajouter une echeance")
-        add_btn.setCursor(Qt.PointingHandCursor)
-        add_btn.setFixedHeight(ds.button_height)
-        add_btn.setStyleSheet(f"""
-            QPushButton {{ background: {p.primary}; color: {p.on_primary}; border: none;
-            border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_md}px;
-            font-size: {s(12)}px; font-weight: bold; }}
-            QPushButton:hover {{ background: {p.primary}; }}
-        """)
-        add_btn.clicked.connect(self._add_milestone)
-        hdr2.addWidget(add_btn)
-        self._layout.addLayout(hdr2)
-
-        self._milestone_table = QVBoxLayout()
-        self._milestone_table.setSpacing(ds.space_xxs)
-        self._layout.addLayout(self._milestone_table)
+        # ── Milestones ──
+        self._milestone_card = None
+        self._milestone_layout = None
 
         self._layout.addStretch()
-
-    def _section_title(self, text: str) -> QLabel:
-        p = theme_manager.palette
-        s = theme_manager.font_size
-        lbl = QLabel(text)
-        lbl.setStyleSheet(
-            f"font-size: {s(16)}px; font-weight: bold; color: {p.text_strong}; "
-            f"border: none; padding-top: {ds.space_sm}px;")
-        return lbl
 
     def refresh(self):
         self._load_fees()
         self._load_schedule()
         self._load_milestones()
 
-    # ── Barème ──
+    # ═══════════════ BARÈME PAR PROGRAMME ═══════════════
     def _load_fees(self):
-        while self._fee_table.count():
-            item = self._fee_table.takeAt(0)
+        # Nettoyer
+        while self._prog_grid.count():
+            item = self._prog_grid.takeAt(0)
             if item and item.widget():
                 item.widget().deleteLater()
 
         p = theme_manager.palette
         s = theme_manager.font_size
         conn = db.server_conn
-        if not conn:
-            return
+        if not conn: return
         cur = conn.cursor()
         cur.execute("""
-            SELECT cfl.id, l.label, p.sigle, cfl.annual_fee, cfl.monthly_amount, cfl.level_id
+            SELECT cfl.id, l.label, p.sigle, cfl.annual_fee, cfl.level_id
             FROM compta_fee_level cfl
             JOIN larcauth_level l ON l.id = cfl.level_id
             JOIN larcauth_program p ON p.id = l.fk_program_id
             WHERE cfl.academic_year = '2026-2027'
             ORDER BY p.sigle, l.label
         """)
-        for row in cur.fetchall():
-            fid, level, sigle, annual, monthly, lid = row
-            rw = QWidget()
-            rl = QHBoxLayout(rw)
-            rl.setContentsMargins(ds.space_sm, ds.space_xxs, ds.space_sm, ds.space_xxs)
-            rl.setSpacing(ds.space_md)
+        rows = cur.fetchall()
 
-            for text, w in [(f"{sigle}", 50), (level, 130)]:
-                lbl = QLabel(text)
-                lbl.setFixedWidth(w)
-                lbl.setStyleSheet(f"font-size: {s(12)}px; color: {p.text_strong}; border: none;")
-                rl.addWidget(lbl)
+        # Grouper par sigle
+        by_prog: dict[str, list] = {sig: [] for sig in PROG_ORDER}
+        for row in rows:
+            fid, level, sigle, annual, lid = row
+            if sigle in by_prog:
+                by_prog[sigle].append((fid, level, annual, lid))
 
-            # Montant annuel editable
-            fee_edit = QLineEdit(str(annual))
-            fee_edit.setFixedWidth(ds.space_xxl + ds.space_md)
-            fee_edit.setFixedHeight(ds.table_row_min + ds.space_xs)
-            fee_edit.setStyleSheet(
-                f"background: {p.surface}; border: 1px solid {p.outline}; "
+        # Disposer les cartes en grille 2 colonnes
+        col = 0
+        row = 0
+        for sigle in PROG_ORDER:
+            levels = by_prog[sigle]
+            if not levels:
+                continue
+            card = self._build_prog_card(sigle, levels, p, s)
+            self._prog_grid.addWidget(card, row, col)
+            col += 1
+            if col >= 2:
+                col = 0
+                row += 1
+
+    def _build_prog_card(self, sigle: str, levels: list, p, s) -> QFrame:
+        """Carte M3Frame pour un programme."""
+        accent = getattr(p, PROG_COLORS.get(sigle, "primary"))
+        card = QFrame()
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background: {p.surface}; border: 1px solid {p.outline_variant};
+                border-radius: {ds.radius_sm}px; border-left: 4px solid {accent};
+            }}
+        """)
+        lo = QVBoxLayout(card)
+        lo.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        lo.setSpacing(ds.space_xs)
+
+        # En-tête programme
+        hdr = QLabel(sigle)
+        hdr.setStyleSheet(f"font-size: {s(16)}px; font-weight: bold; color: {accent}; border: none;")
+        lo.addWidget(hdr)
+
+        for fid, level, annual, lid in levels:
+            row_w = QWidget()
+            rl = QHBoxLayout(row_w)
+            rl.setContentsMargins(ds.space_xs, ds.space_xxs, ds.space_xs, ds.space_xxs)
+            rl.setSpacing(ds.space_sm)
+
+            lbl = QLabel(level)
+            lbl.setFixedWidth(ds.space_xxl + ds.space_md)
+            lbl.setStyleSheet(f"font-size: {s(12)}px; color: {p.text_strong}; border: none;")
+            rl.addWidget(lbl)
+
+            # Champ montant éditable
+            fee = QLineEdit(str(annual))
+            fee.setFixedWidth(ds.space_xxl)
+            fee.setFixedHeight(ds.field_height - ds.space_md)
+            fee.setAlignment(Qt.AlignRight)
+            fee.setStyleSheet(
+                f"background: {p.background}; border: 1px solid {p.outline}; "
                 f"border-radius: {ds.radius_xs}px; padding: {ds.space_xxs}px {ds.space_xs}px; "
                 f"color: {p.text_strong}; font-size: {s(12)}px;")
-            fee_edit.setToolTip(f"Modifier le montant annuel pour {level} ({sigle})")
-            # Sauver au blur (perte de focus)
-            fee_edit.editingFinished.connect(
-                lambda le=fee_edit, f=fid: self._save_fee(f, le.text()))
-            rl.addWidget(fee_edit)
+            fee.editingFinished.connect(lambda le=fee, f=fid: self._save_fee(f, le.text()))
+            rl.addWidget(fee)
 
-            lbl_fcfa = QLabel("FCFA")
-            lbl_fcfa.setStyleSheet(f"font-size: {s(11)}px; color: {p.text_soft}; border: none;")
-            rl.addWidget(lbl_fcfa)
-
+            fcfa = QLabel("FCFA")
+            fcfa.setStyleSheet(f"font-size: {s(11)}px; color: {p.text_soft}; border: none;")
+            rl.addWidget(fcfa)
             rl.addStretch()
-            rw.setStyleSheet(
-                f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}"
-                f"QWidget:hover {{ background: {p.surface_variant}; }}")
-            self._fee_table.addWidget(rw)
+
+            lo.addWidget(row_w)
+
+        return card
 
     def _save_fee(self, fee_id: int, text: str):
         try:
@@ -165,90 +181,98 @@ class FeeConfig(QScrollArea):
         except ValueError:
             return
         conn = db.server_conn
-        if not conn:
-            return
+        if not conn: return
         cur = conn.cursor()
-        cur.execute("UPDATE compta_fee_level SET annual_fee = %s, monthly_amount = %s WHERE id = %s",
+        cur.execute("UPDATE compta_fee_level SET annual_fee=%s, monthly_amount=%s WHERE id=%s",
                     (amount, amount // 10, fee_id))
 
-    # ── Échéancier global ──
+    # ═══════════════ ÉCHÉANCIER GLOBAL ═══════════════
     def _load_schedule(self):
-        while self._sched_table.count():
-            item = self._sched_table.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
-
         p = theme_manager.palette
         s = theme_manager.font_size
-        conn = db.server_conn
-        if not conn:
-            return
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, month_number, percentage_expected
-            FROM compta_payment_schedule WHERE academic_year = '2026-2027'
-            ORDER BY month_number
-        """)
-        months = ["Sept.", "Oct.", "Nov.", "Dec.", "Janv.", "Fev.", "Mars", "Avr.", "Mai", "Juin"]
-        for row in cur.fetchall():
-            sid, mn, pct = row
-            rw = QWidget()
-            rl = QHBoxLayout(rw)
-            rl.setContentsMargins(ds.space_sm, ds.space_xxs, ds.space_sm, ds.space_xxs)
-            rl.setSpacing(ds.space_md)
+        # Retirer l'ancienne carte
+        if self._sched_card and self._sched_card.parent():
+            self._layout.removeWidget(self._sched_card)
+            self._sched_card.deleteLater()
 
-            lbl = QLabel(f"Mois {mn} — {months[mn-1] if mn <= 10 else 'Mois '+str(mn)}")
-            lbl.setFixedWidth(150)
-            lbl.setStyleSheet(f"font-size: {s(12)}px; color: {p.text_strong}; border: none;")
+        conn = db.server_conn
+        if not conn: return
+        cur = conn.cursor()
+        cur.execute("SELECT id, month_number, percentage_expected "
+                    "FROM compta_payment_schedule WHERE academic_year='2026-2027' "
+                    "ORDER BY month_number")
+
+        card = QFrame()
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(f"""
+            QFrame {{ background: {p.surface}; border: 1px solid {p.outline_variant};
+            border-radius: {ds.radius_sm}px; border-left: 4px solid {p.primary}; }}
+        """)
+        lo = QVBoxLayout(card)
+        lo.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        lo.setSpacing(ds.space_xs)
+
+        hdr = QLabel("Échéancier global (% attendu cumulé)")
+        hdr.setStyleSheet(f"font-size: {s(16)}px; font-weight: bold; color: {p.primary}; border: none;")
+        lo.addWidget(hdr)
+
+        # Grille 5×2 pour les 10 mois
+        grid = QGridLayout()
+        grid.setSpacing(ds.space_sm)
+        for i, (sid2, mn, pct) in enumerate(cur.fetchall()):
+            w = QWidget()
+            rl = QHBoxLayout(w)
+            rl.setContentsMargins(ds.space_xs, ds.space_xxs, ds.space_xs, ds.space_xxs)
+            rl.setSpacing(ds.space_xs)
+
+            lbl = QLabel(MONTHS[mn - 1] if mn <= 10 else f"Mois {mn}")
+            lbl.setStyleSheet(f"font-size: {s(11)}px; color: {p.text_strong}; border: none;")
             rl.addWidget(lbl)
 
             pct_edit = QLineEdit(str(pct))
-            pct_edit.setFixedWidth(80)
-            pct_edit.setFixedHeight(ds.table_row_min + ds.space_xs)
+            pct_edit.setFixedWidth(theme_manager.image.logo_small)  # 55px
+            pct_edit.setFixedHeight(ds.field_height - ds.space_md)
+            pct_edit.setAlignment(Qt.AlignRight)
             pct_edit.setStyleSheet(
-                f"background: {p.surface}; border: 1px solid {p.outline}; "
+                f"background: {p.background}; border: 1px solid {p.outline}; "
                 f"border-radius: {ds.radius_xs}px; padding: {ds.space_xxs}px {ds.space_xs}px; "
-                f"color: {p.text_strong}; font-size: {s(12)}px;")
-            pct_edit.editingFinished.connect(
-                lambda le=pct_edit, s=sid: self._save_schedule(s, le.text()))
+                f"color: {p.text_strong}; font-size: {s(11)}px;")
+            pct_edit.editingFinished.connect(lambda le=pct_edit, sid=sid2: self._save_schedule(sid, le.text()))
             rl.addWidget(pct_edit)
 
-            lbl_pct = QLabel("% attendu cumule")
-            lbl_pct.setStyleSheet(f"font-size: {s(11)}px; color: {p.text_soft}; border: none;")
-            rl.addWidget(lbl_pct)
+            pct_lbl = QLabel("%")
+            pct_lbl.setStyleSheet(f"font-size: {s(11)}px; color: {p.text_soft}; border: none;")
+            rl.addWidget(pct_lbl)
 
-            rl.addStretch()
-            rw.setStyleSheet(
-                f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}"
-                f"QWidget:hover {{ background: {p.surface_variant}; }}")
-            self._sched_table.addWidget(rw)
+            grid.addWidget(w, i // 2, i % 2)
+
+        lo.addLayout(grid)
+        self._sched_card = card
+        self._sched_layout = lo
+        # Insérer avant le stretch final
+        self._layout.insertWidget(self._layout.count() - 1, card)
 
     def _save_schedule(self, sid: int, text: str):
         try:
             pct = float(text)
-            if pct < 0 or pct > 100:
-                return
+            if pct < 0 or pct > 100: return
         except ValueError:
             return
         conn = db.server_conn
-        if not conn:
-            return
+        if not conn: return
         cur = conn.cursor()
-        cur.execute("UPDATE compta_payment_schedule SET percentage_expected = %s WHERE id = %s",
-                    (pct, sid))
+        cur.execute("UPDATE compta_payment_schedule SET percentage_expected=%s WHERE id=%s", (pct, sid))
 
-    # ── Échéances parents ──
+    # ═══════════════ ÉCHÉANCES PARENTS ═══════════════
     def _load_milestones(self):
-        while self._milestone_table.count():
-            item = self._milestone_table.takeAt(0)
-            if item and item.widget():
-                item.widget().deleteLater()
-
         p = theme_manager.palette
         s = theme_manager.font_size
+        if self._milestone_card and self._milestone_card.parent():
+            self._layout.removeWidget(self._milestone_card)
+            self._milestone_card.deleteLater()
+
         conn = db.server_conn
-        if not conn:
-            return
+        if not conn: return
         cur = conn.cursor()
         cur.execute("""
             SELECT m.id, a.first_name, a.last_name, m.due_date, m.amount_expected, m.notes
@@ -256,63 +280,93 @@ class FeeConfig(QScrollArea):
             JOIN larcauth_aecuser a ON a.id = m.parent_id
             ORDER BY m.due_date DESC, a.last_name LIMIT 50
         """)
-        for row in cur.fetchall():
-            mid, fn, ln, due, amount, notes = row
-            rw = QWidget()
-            rl = QHBoxLayout(rw)
-            rl.setContentsMargins(ds.space_sm, ds.space_xxs, ds.space_sm, ds.space_xxs)
-            rl.setSpacing(ds.space_md)
+        rows = cur.fetchall()
 
-            for text, w, color, bold in [
-                (f"{fn} {ln}", 170, p.text_strong, True),
-                (str(due), 110, p.text_soft, False),
-                (_fmt(amount), 100, p.primary, True),
-                (notes or "", 200, p.text_soft, False),
-            ]:
-                lbl = QLabel(text)
-                lbl.setFixedWidth(w)
-                lbl.setStyleSheet(
-                    f"font-size: {s(11)}px; {'font-weight: bold;' if bold else ''} "
-                    f"color: {color}; border: none;")
-                rl.addWidget(lbl)
+        card = QFrame()
+        card.setAttribute(Qt.WA_StyledBackground, True)
+        card.setStyleSheet(f"""
+            QFrame {{ background: {p.surface}; border: 1px solid {p.outline_variant};
+            border-radius: {ds.radius_sm}px; border-left: 4px solid {p.tertiary}; }}
+        """)
+        lo = QVBoxLayout(card)
+        lo.setContentsMargins(ds.space_m3, ds.space_m3, ds.space_m3, ds.space_m3)
+        lo.setSpacing(ds.space_sm)
 
-            del_btn = QPushButton("Suppr.")
-            del_btn.setCursor(Qt.PointingHandCursor)
-            del_btn.setFixedHeight(ds.space_lg)
-            del_btn.setStyleSheet(
-                f"QPushButton {{ background: {p.error}; color: white; border: none; "
-                f"border-radius: {ds.radius_xs}px; padding: 2px 8px; "
-                f"font-size: {s(10)}px; font-weight: bold; }}"
-                f"QPushButton:hover {{ background: {p.error}; }}")
-            del_btn.clicked.connect(lambda checked, m=mid: self._delete_milestone(m))
-            rl.addWidget(del_btn)
+        hdr_row = QHBoxLayout()
+        hdr = QLabel("Échéances personnalisées parents")
+        hdr.setStyleSheet(f"font-size: {s(16)}px; font-weight: bold; color: {p.tertiary}; border: none;")
+        hdr_row.addWidget(hdr)
+        hdr_row.addStretch()
 
-            rl.addStretch()
-            rw.setStyleSheet(
-                f"QWidget {{ background: {p.surface}; border-radius: {ds.radius_xs}px; }}"
-                f"QWidget:hover {{ background: {p.surface_variant}; }}")
-            self._milestone_table.addWidget(rw)
+        add_btn = QPushButton("+ Ajouter")
+        add_btn.setCursor(Qt.PointingHandCursor)
+        add_btn.setFixedHeight(ds.button_height)
+        add_btn.setStyleSheet(
+            f"QPushButton {{ background: {p.primary}; color: {p.on_primary}; border: none; "
+            f"border-radius: {ds.radius_sm}px; padding: {ds.space_xs}px {ds.space_md}px; "
+            f"font-size: {s(12)}px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background: {p.primary}; }}")
+        add_btn.clicked.connect(self._add_milestone)
+        hdr_row.addWidget(add_btn)
+        lo.addLayout(hdr_row)
+
+        if not rows:
+            empty = QLabel("Aucune échéance personnalisée")
+            empty.setStyleSheet(f"font-size: {s(12)}px; color: {p.text_soft}; font-style: italic; border: none;")
+            lo.addWidget(empty)
+        else:
+            for mid, fn, ln, due, amount, notes in rows:
+                rw = QWidget()
+                rl = QHBoxLayout(rw)
+                rl.setContentsMargins(ds.space_sm, ds.space_xxs, ds.space_sm, ds.space_xxs)
+                rl.setSpacing(ds.space_md)
+
+                for text, w, color, bold in [
+                    (f"{fn} {ln}", ds.space_xxxl, p.text_strong, True),
+                    (str(due), ds.space_xxl + ds.space_md, p.text_soft, False),
+                    (_fmt(amount), ds.space_xxl, p.primary, True),
+                    (notes or "", ds.space_xxxl, p.text_soft, False),
+                ]:
+                    lbl = QLabel(text)
+                    lbl.setFixedWidth(w)
+                    lbl.setStyleSheet(f"font-size: {s(11)}px; {'font-weight: bold;' if bold else ''} "
+                                      f"color: {color}; border: none;")
+                    rl.addWidget(lbl)
+
+                del_btn = QPushButton("×")
+                del_btn.setCursor(Qt.PointingHandCursor)
+                del_btn.setFixedSize(ds.space_lg, ds.space_lg)
+                del_btn.setStyleSheet(
+                    f"QPushButton {{ background: transparent; color: {p.error}; border: 1px solid {p.error}; "
+                    f"border-radius: {ds.radius_xs // 2}px; font-size: {s(14)}px; font-weight: bold; }}"
+                    f"QPushButton:hover {{ background: {p.error}; color: white; }}")
+                del_btn.clicked.connect(lambda checked, m=mid: self._delete_milestone(m))
+                rl.addWidget(del_btn)
+                rl.addStretch()
+
+                lo.addWidget(rw)
+
+        self._milestone_card = card
+        self._layout.insertWidget(self._layout.count() - 1, card)
 
     def _add_milestone(self):
-        """Ajoute une échéance personnalisée pour un parent."""
         conn = db.server_conn
-        if not conn:
-            return
-        # Dialogue rapide : recherche parent + date + montant
-        from PySide6.QtWidgets import QDialog, QFormLayout, QLineEdit, QDateEdit
+        if not conn: return
+        cur = conn.cursor()
+
+        from PySide6.QtWidgets import QDialog
         dlg = QDialog(self)
-        dlg.setWindowTitle("Nouvelle echeance parent")
-        dlg.setMinimumSize(420, 250)
+        dlg.setWindowTitle("Nouvelle échéance parent")
+        dlg.setMinimumSize(ds.golden_width(ds.sidebar_width), ds.space_xxxl + ds.space_xl)
         dlg.setStyleSheet(f"background: {theme_manager.palette.surface};")
         lo = QFormLayout(dlg)
         lo.setSpacing(ds.space_sm)
 
-        fstyle = (
-            f"background: {theme_manager.palette.background}; "
-            f"border: 1px solid {theme_manager.palette.outline}; "
-            f"border-radius: {ds.radius_xs}px; padding: {ds.space_sm}px; "
-            f"color: {theme_manager.palette.text_strong}; "
-            f"font-size: {theme_manager.font_size(13)}px;")
+        fstyle = (f"background: {theme_manager.palette.background}; "
+                  f"border: 1px solid {theme_manager.palette.outline}; "
+                  f"border-radius: {ds.radius_xs}px; padding: {ds.space_sm}px; "
+                  f"color: {theme_manager.palette.text_strong}; "
+                  f"font-size: {theme_manager.font_size(13)}px;")
 
         parent_name = QLineEdit()
         parent_name.setPlaceholderText("Nom du parent payeur...")
@@ -325,7 +379,7 @@ class FeeConfig(QScrollArea):
         due_date.setCalendarPopup(True)
         due_date.setFixedHeight(ds.field_height)
         due_date.setStyleSheet(fstyle)
-        lo.addRow("Date echeance :", due_date)
+        lo.addRow("Date échéance :", due_date)
 
         amount = QLineEdit()
         amount.setPlaceholderText("Montant attendu (FCFA)")
@@ -344,16 +398,19 @@ class FeeConfig(QScrollArea):
         cancel = QPushButton("Annuler")
         cancel.setCursor(Qt.PointingHandCursor)
         cancel.setFixedHeight(ds.button_height)
+        cancel.setStyleSheet(f"QPushButton {{ background: transparent; color: {theme_manager.palette.text_strong}; "
+            f"border: 1px solid {theme_manager.palette.outline}; border-radius: {ds.radius_sm}px; "
+            f"padding: {ds.space_xs}px {ds.space_md}px; }}"
+            f"QPushButton:hover {{ background: {theme_manager.palette.surface_variant}; }}")
         cancel.clicked.connect(dlg.reject)
         btn_row.addWidget(cancel)
-        save = QPushButton("Ajouter")
-        save.setCursor(Qt.PointingHandCursor)
-        save.setFixedHeight(ds.button_height)
-        save.setStyleSheet(
-            f"QPushButton {{ background: {theme_manager.palette.primary}; color: white; "
+        save_btn = QPushButton("Ajouter")
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.setFixedHeight(ds.button_height)
+        save_btn.setStyleSheet(f"QPushButton {{ background: {theme_manager.palette.primary}; color: white; "
             f"border: none; border-radius: {ds.radius_sm}px; "
             f"padding: {ds.space_xs}px {ds.space_md}px; font-weight: bold; }}")
-        btn_row.addWidget(save)
+        btn_row.addWidget(save_btn)
         lo.addRow(btn_row)
 
         def on_save():
@@ -362,31 +419,26 @@ class FeeConfig(QScrollArea):
                 amt = int(amount.text().replace(" ", ""))
             except ValueError:
                 return
-            if not name or amt <= 0:
-                return
-            cur = conn.cursor()
-            # Chercher le parent
-            cur.execute(
-                "SELECT id FROM larcauth_aecuser WHERE "
-                "(first_name || ' ' || last_name) ILIKE %s LIMIT 1",
-                (f"%{name}%",))
-            pr = cur.fetchone()
+            if not name or amt <= 0: return
+            cur2 = conn.cursor()
+            cur2.execute("SELECT id FROM larcauth_aecuser WHERE "
+                         "(first_name || ' ' || last_name) ILIKE %s LIMIT 1", (f"%{name}%",))
+            pr = cur2.fetchone()
             if not pr:
                 QMessageBox.warning(dlg, "Erreur", "Parent introuvable.")
                 return
-            cur.execute("""INSERT INTO compta_parent_milestone (parent_id, due_date, amount_expected, notes)
-                VALUES (%s, %s, %s, %s)""",
-                (pr[0], due_date.date().toPython(), amt, note.text().strip() or None))
+            cur2.execute("INSERT INTO compta_parent_milestone (parent_id, due_date, amount_expected, notes) "
+                         "VALUES (%s, %s, %s, %s)",
+                         (pr[0], due_date.date().toPython(), amt, note.text().strip() or None))
             dlg.accept()
 
-        save.clicked.connect(on_save)
+        save_btn.clicked.connect(on_save)
         if dlg.exec():
             self.refresh()
 
     def _delete_milestone(self, mid: int):
         conn = db.server_conn
-        if not conn:
-            return
+        if not conn: return
         cur = conn.cursor()
         cur.execute("DELETE FROM compta_parent_milestone WHERE id = %s", (mid,))
         self.refresh()
