@@ -28,6 +28,150 @@ GROUP_FILTER_SQL = {
     "grp_lycee":    "AND (p.sigle ILIKE 'DPEn' OR p.sigle ILIKE 'DPFr')",
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Health Bar — S2a (jauge % encaissé global + par programme)
+# ═══════════════════════════════════════════════════════════════════════════
+class _HealthBar(QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._global_pct = 0
+        self._programs: list[tuple[str, int]] = []
+        self.setObjectName("health_bar")
+        self.setMinimumHeight(ds.space_lg + ds.space_md)
+        ds.theme_changed.connect(self.update)
+
+    def set_data(self, global_pct: int, programs: list[tuple[str, int]]):
+        self._global_pct = global_pct
+        self._programs = programs
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0:
+            p.end(); return
+        pal = theme_manager.palette
+        s = theme_manager.font_size
+        bar_h = s(12)
+        bar_y = (h - bar_h) // 2
+        bar_w = w - ds.space_md * 2
+
+        # Fond gris
+        p.fillRect(ds.space_md, bar_y, bar_w, bar_h, QColor(pal.outline_variant))
+        # Barre verte
+        fill_w = max(2, int(bar_w * self._global_pct / 100))
+        p.fillRect(ds.space_md, bar_y, fill_w, bar_h, QColor(pal.success))
+        # % texte
+        p.setPen(QColor(pal.text_strong))
+        p.setFont(QFont("Segoe UI", s(12), QFont.Bold))
+        p.drawText(ds.space_md, 0, bar_w, bar_y + s(13), Qt.AlignCenter,
+                   f"{self._global_pct} % encaissé")
+
+        # Textes programme
+        p.setFont(QFont("Segoe UI", s(10)))
+        prog_colors = {"Primaire": pal.primary, "College": pal.success, "Lycee": pal.tertiary}
+        tx = ds.space_md
+        for prog, pct in self._programs:
+            color = prog_colors.get(prog.replace(" (PYP/PP)", "").replace(" (PEI/MYP)", "").replace(" (DP)", ""), pal.text_soft)
+            txt = f"  {prog} {pct}%  "
+            tw = p.fontMetrics().horizontalAdvance(txt)
+            p.setPen(QColor(color))
+            p.drawText(tx, bar_y + bar_h + s(13), tw, s(10), Qt.AlignLeft, txt)
+            tx += tw
+
+        p.end()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Projection Chart — S2b (courbe attendu standard + ajustée + réel)
+# ═══════════════════════════════════════════════════════════════════════════
+class _ProjectionChart(QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._real: list[int] = []
+        self._expected: list[int] = []
+        self.setObjectName("projection")
+        self.setMinimumHeight(ds.space_xxxl + ds.space_md)
+        ds.theme_changed.connect(self.update)
+
+    def set_data(self, real: list[int], expected: list[int]):
+        self._real = real
+        self._expected = expected
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height()
+        if w <= 0 or h <= 0 or not self._expected:
+            p.end(); return
+        pal = theme_manager.palette
+        s = theme_manager.font_size
+        p.fillRect(0, 0, w, h, QColor(pal.surface))
+
+        p.setPen(QColor(pal.text_strong))
+        p.setFont(QFont("Segoe UI", s(11), QFont.Bold))
+        p.drawText(ds.space_sm, s(21), "Projection")
+
+        if len(self._expected) < 2:
+            p.end(); return
+
+        n = len(self._expected)
+        margin = ds.space_md
+        chart_w = w - margin * 2
+        chart_h = h - ds.space_lg - margin
+        y0 = h - margin
+        max_val = max(max(self._expected), max(self._real or [1]), 1)
+
+        months = ["S", "O", "N", "D", "J", "F", "M", "A", "M", "J"]
+
+        def _x(i):
+            return margin + int(i * chart_w / max(1, n - 1))
+
+        def _y(val):
+            return y0 - int(val * chart_h / max_val)
+
+        # Grille
+        p.setPen(QPen(QColor(pal.outline_variant), 1, Qt.DotLine))
+        for pct in [25, 50, 75, 100]:
+            y_ = _y(int(max_val * pct / 100))
+            p.drawLine(margin, y_, margin + chart_w, y_)
+            p.setPen(QColor(pal.text_soft))
+            p.setFont(QFont("Segoe UI", s(7)))
+            p.drawText(2, y_ + s(5), f"{pct}%")
+            p.setPen(QPen(QColor(pal.outline_variant), 1, Qt.DotLine))
+
+        # Courbe attendu (pointillés, gris)
+        pen_std = QPen(QColor(pal.text_soft), 2, Qt.DashLine)
+        p.setPen(pen_std)
+        for i in range(n - 1):
+            p.drawLine(_x(i), _y(self._expected[i]), _x(i + 1), _y(self._expected[i + 1]))
+        for i in range(n):
+            p.drawEllipse(QPointF(_x(i), _y(self._expected[i])), 3, 3)
+
+        # Courbe réelle (pleine, couleur)
+        if self._real and len(self._real) == n:
+            pen_real = QPen(QColor(pal.primary), 3)
+            p.setPen(pen_real)
+            for i in range(n - 1):
+                p.drawLine(_x(i), _y(self._real[i]), _x(i + 1), _y(self._real[i + 1]))
+            for i in range(n):
+                p.setBrush(QColor(pal.primary))
+                p.drawEllipse(QPointF(_x(i), _y(self._real[i])), 4, 4)
+
+        # Mois
+        p.setPen(QColor(pal.text_soft))
+        p.setFont(QFont("Segoe UI", s(8)))
+        for i in range(n):
+            p.drawText(_x(i) - s(8), y0 + s(13), s(16), s(13), Qt.AlignCenter,
+                       months[i] if i < len(months) else str(i + 1))
+
+        p.end()
+
+
 def _build_filter(mode: str) -> str:
     """Construit une clause WHERE pour filtrer par programme."""
     if mode in GROUP_FILTER_SQL:
@@ -328,6 +472,15 @@ class Dashboard(QScrollArea):
             f"font-size: {s(ds.font_title)}px; font-weight: bold; color: {p.primary}; border: none;")
         layout.addWidget(self._scope_label)
 
+        # ── BARRE DE SANTÉ (S2a) ──
+        self._health_bar = _HealthBar()
+        self._health_bar.setFixedHeight(ds.space_lg + ds.space_md + s(ds.font_label_sm))
+        layout.addWidget(self._health_bar)
+
+        # ── PROJECTION (S2b) ──
+        self._projection = _ProjectionChart()
+        layout.addWidget(self._projection)
+
         # DP2 — KPI ROW (cards horizontales)
         self._kpi_title = QLabel("Indicateurs cles")
         self._kpi_title.setStyleSheet(
@@ -367,9 +520,69 @@ class Dashboard(QScrollArea):
         layout.addLayout(body, 1)
 
     def refresh(self):
+        self._load_health()
         self._load_kpis()
         self._load_charts()
         self._load_table()
+
+    # ── Health Bar + Projection (S2a, S2b) ──
+    def _load_health(self):
+        conn = db.server_conn
+        if not conn: return
+        cur = conn.cursor()
+
+        # % encaissé global
+        cur.execute("""
+            SELECT COALESCE(SUM(total_paid), 0), COALESCE(SUM(total_due), 0)
+            FROM compta_parent_balance WHERE academic_year = '2026-2027'
+        """)
+        paid, due = cur.fetchone() or (0, 0)
+        global_pct = int(paid / due * 100) if due > 0 else 0
+
+        # Par programme
+        programs = []
+        for cat, col_ids, lycee_ids in [("Primaire (PYP/PP)", (11, 21), ()),
+                                          ("College (PEI/MYP)", (12, 22), ()),
+                                          ("Lycee (DP)", (), (13, 23))]:
+            cur.execute("""
+                SELECT COALESCE(SUM(b.total_paid), 0), COALESCE(SUM(b.total_due), 0)
+                FROM compta_parent_balance b
+                WHERE b.academic_year = '2026-2027'
+                  AND EXISTS (
+                      SELECT 1 FROM larcauth_student_parent sp
+                      JOIN larcauth_student st ON st.aecuser_ptr_id = sp.student_id
+                      JOIN larcauth_classroom cl ON cl.id = st.s_classroom_id
+                      JOIN larcauth_level lv ON lv.id = cl.fk_level_id
+                      JOIN larcauth_program pr ON pr.id = lv.fk_program_id
+                      WHERE sp.parent_id = b.parent_id AND pr.id IN ({})
+                  )
+            """.format(','.join(str(i) for i in col_ids + lycee_ids)))
+            pp, dd = cur.fetchone() or (0, 0)
+            pct = int(pp / dd * 100) if dd > 0 else 0
+            programs.append((cat, pct))
+
+        self._health_bar.set_data(global_pct, programs)
+
+        # Projection : attendu (échéancier) vs réel (paiements) mois par mois
+        cur.execute("SELECT month_number, percentage_expected FROM compta_payment_schedule "
+                    "WHERE academic_year = '2026-2027' ORDER BY month_number")
+        schedule = {r[0]: float(r[1]) for r in cur.fetchall()}
+
+        expected = []
+        real = []
+        total_due = due
+        for month in range(1, 11):
+            pct = schedule.get(month, 0)
+            expected.append(int(total_due * pct / 100) if total_due > 0 else 0)
+            # Somme des paiements avant ce mois
+            cur.execute("""
+                SELECT COALESCE(SUM(amount), 0) FROM compta_payment
+                WHERE DATE_PART('month', payment_date) <= %s
+            """, (month,))
+            real_paid = cur.fetchone()[0] or 0
+            real.append(int(real_paid))
+
+        self._projection.set_data(real, expected)
 
     # ── KPI Cards (DP2 pattern) ──
     def _load_kpis(self):
